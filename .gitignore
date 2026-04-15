@@ -1,0 +1,27 @@
+# Configurazione locale (contiene IP, chiavi, credenziali)
+.env
+
+# Output generato
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Ansible
+*.retry
+ansible/.vault_pass
+
+# Kubeconfig generato
+kubeconfig
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -20,7 +20,7 @@ Sistema target: Ubuntu (22.04 / 24.04)
 ⸻
 
 Filosofia
-  • Configurazione dichiarativa (file YAML = source of truth)
+  • Configurazione dichiarativa (.env = source of truth)
   • Automazione idempotente (Ansible)
   • CLI semplice (Python)
   • Modularità (addon attivabili/disattivabili)
@@ -48,10 +48,11 @@ Fun-Kube/
 ├── fun_kube/                 # package Python
 │   ├── __init__.py
 │   ├── cli.py
-│   ├── config.py             # parsing e validazione cluster.yaml
+│   ├── config.py             # parsing e validazione .env
 │   ├── preflight.py          # preflight checks via SSH
 │   └── runner.py             # esecuzione playbook Ansible
-├── cluster.yaml              # config di esempio (editabile)
+├── .env.example              # template con tutte le variabili (committato)
+├── .env                      # configurazione locale (NON committato)
 ├── ansible/
 │   ├── inventory.py          # dynamic inventory da cluster.yaml
 │   ├── playbooks/
@@ -81,62 +82,53 @@ Fun-Kube/
 
 ⸻
 
-Configurazione cluster (cluster.yaml)
+Configurazione cluster (.env)
 
-# Esempio HA con 3 control-plane
-# Per single control-plane: rimuovere i nodi cp2/cp3 e la sezione keepalived
-# Per mononodo: lasciare solo un nodo con role: control-plane, nessun worker
+Il file .env è l'unica source of truth. Si parte sempre da .env.example:
 
-cluster_name: mycluster
+  cp .env.example .env
+  # editare .env con i propri valori
 
-nodes:
-  - ip: 10.0.0.1
-    role: control-plane
-    hostname: cp1
-  - ip: 10.0.0.2
-    role: control-plane
-    hostname: cp2
-  - ip: 10.0.0.3
-    role: control-plane
-    hostname: cp3
-  - ip: 10.0.0.4
-    role: worker
-    hostname: worker1
-  - ip: 10.0.0.5
-    role: worker
-    hostname: worker2
+Esempio (HA con 3 control-plane — vedere .env.example per tutte le opzioni):
 
-ssh:
-  user: ubuntu
-  key_path: ~/.ssh/id_rsa
+  CLUSTER_NAME=mycluster
 
-kubernetes:
-  version: latest        # oppure es. "1.30.2"
-  pod_cidr: 172.16.0.0/16
-  service_cidr: 10.96.0.0/12
+  NODE_1_IP=10.0.0.1
+  NODE_1_ROLE=control-plane
+  NODE_1_HOSTNAME=cp1
 
-network:
-  cni: calico
+  NODE_2_IP=10.0.0.2
+  NODE_2_ROLE=control-plane
+  NODE_2_HOSTNAME=cp2
 
-# Keepalived — obbligatorio solo se control-plane >= 3
-# Il VIP deve essere un IP libero sulla stessa subnet dei nodi
-keepalived:
-  enabled: true
-  vip: 10.0.0.100
-  interface: eth0        # interfaccia di rete dei nodi control-plane
+  NODE_3_IP=10.0.0.3
+  NODE_3_ROLE=control-plane
+  NODE_3_HOSTNAME=cp3
 
-addons:
-  metallb:
-    enabled: true
-    ip_pool: 10.0.0.200-10.0.0.220   # deve essere sulla subnet dei nodi, fuori dal pod_cidr
+  NODE_4_IP=10.0.0.4
+  NODE_4_ROLE=worker
+  NODE_4_HOSTNAME=worker1
 
-  ingress:
-    type: traefik        # oppure nginx-proxy-manager
+  SSH_USER=ubuntu
+  SSH_KEY_PATH=~/.ssh/id_rsa
 
-  storage:
-    longhorn:
-      enabled: true
-      rwx: true
+  K8S_VERSION=latest
+  POD_CIDR=172.16.0.0/16
+  SERVICE_CIDR=10.96.0.0/12
+  CNI=calico
+
+  KEEPALIVED_ENABLED=true
+  KEEPALIVED_VIP=10.0.0.100
+  KEEPALIVED_INTERFACE=eth0
+
+  METALLB_ENABLED=true
+  METALLB_IP_POOL=10.0.0.200-10.0.0.220
+
+  INGRESS_ENABLED=true
+  INGRESS_TYPE=traefik
+
+  LONGHORN_ENABLED=true
+  LONGHORN_RWX=true
 
 ⸻
 
@@ -144,7 +136,8 @@ CLI
 
 Comando principale:
 
-  fun-kube up cluster.yaml
+  fun-kube up            # legge .env nella directory corrente
+  fun-kube up /path/.env # .env alternativo
 
 Opzioni:
 
