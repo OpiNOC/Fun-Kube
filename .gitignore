@@ -1,6 +1,9 @@
 # Configurazione locale (contiene IP, chiavi, credenziali)
 .env
 
+# Prompt per Kimi (strumento locale, non parte del progetto)
+KIMI-PROMPTS/
+
 # Output generato
 output/
 

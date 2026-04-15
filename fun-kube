@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""
+fun-kube entry point — usabile direttamente senza pip install.
+Aggiungere al PATH oppure eseguire con ./fun-kube
+"""
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from fun_kube.cli import main
+
+if __name__ == "__main__":
+    main()
