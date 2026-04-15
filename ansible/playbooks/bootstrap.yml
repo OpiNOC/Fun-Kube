@@ -1,0 +1,9 @@
+# Bootstrap all nodes
+---
+- name: Bootstrap all nodes
+  hosts: all
+  become: true
+  roles:
+    - common
+    - containerd
+    - kubeadm

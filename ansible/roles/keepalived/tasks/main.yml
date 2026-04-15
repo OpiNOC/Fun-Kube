@@ -1,0 +1,25 @@
+# tasks file for keepalived
+---
+- name: Install keepalived and ipvsadm
+  ansible.builtin.apt:
+    name:
+      - keepalived
+      - ipvsadm
+    state: present
+    update_cache: true
+  become: true
+
+- name: Configure keepalived
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    mode: '0644'
+  become: true
+  notify: Restart keepalived
+
+- name: Enable and start keepalived
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: true
+    state: started
+  become: true

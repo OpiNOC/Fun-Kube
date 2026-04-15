@@ -1,0 +1,52 @@
+# tasks file for metallb
+---
+- name: Download MetalLB manifest
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
+    dest: /tmp/metallb-native.yaml
+    mode: '0644'
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+
+- name: Apply MetalLB manifest
+  ansible.builtin.command: kubectl apply -f /tmp/metallb-native.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true
+
+- name: Wait for MetalLB pods to be running
+  ansible.builtin.command: |
+    kubectl wait --for=condition=Ready pod --all -n metallb-system --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: false
+  ignore_errors: true
+
+- name: Apply MetalLB IPAddressPool
+  ansible.builtin.template:
+    src: ipaddresspool.yaml.j2
+    dest: /tmp/metallb-ipaddresspool.yaml
+    mode: '0644'
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+
+- name: Apply MetalLB L2Advertisement
+  ansible.builtin.template:
+    src: l2advertisement.yaml.j2
+    dest: /tmp/metallb-l2advertisement.yaml
+    mode: '0644'
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+
+- name: Apply MetalLB configuration
+  ansible.builtin.command: |
+    kubectl apply -f /tmp/metallb-ipaddresspool.yaml -f /tmp/metallb-l2advertisement.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true

@@ -1,0 +1,8 @@
+# Deploy MetalLB
+---
+- name: Deploy MetalLB
+  hosts: control_plane[0]
+  become: true
+  roles:
+    - metallb
+  when: metallb_enabled | default(false) | bool

@@ -1,0 +1,4 @@
+# defaults file for traefik
+---
+traefik_version: latest
+traefik_namespace: traefik

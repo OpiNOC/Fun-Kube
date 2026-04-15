@@ -1,0 +1,57 @@
+# tasks file for calico
+---
+- name: Download Calico operator manifest
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"
+    dest: /tmp/tigera-operator.yaml
+    mode: '0644'
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+
+- name: Download Calico custom resources manifest
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/custom-resources.yaml"
+    dest: /tmp/custom-resources.yaml
+    mode: '0644'
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+
+- name: Apply Calico operator manifest
+  ansible.builtin.command: kubectl apply -f /tmp/tigera-operator.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true
+
+- name: Apply Calico Installation with custom pod CIDR
+  ansible.builtin.shell: |
+    set -o pipefail
+    cat <<EOF | kubectl apply -f -
+    apiVersion: operator.tigera.io/v1
+    kind: Installation
+    metadata:
+      name: default
+    spec:
+      calicoNetwork:
+        ipPools:
+        - cidr: {{ pod_cidr }}
+          encapsulation: VXLAN
+          natOutgoing: Enabled
+          nodeSelector: all()
+    EOF
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true
+
+- name: Wait for Calico pods to be running
+  ansible.builtin.command: |
+    kubectl wait --for=condition=Ready pod -l k8s-app=calico-node -n calico-system --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: false
+  ignore_errors: true

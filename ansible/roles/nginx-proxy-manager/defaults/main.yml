@@ -1,0 +1,4 @@
+# defaults file for nginx-proxy-manager
+---
+npm_namespace: npm
+npm_admin_port: 81

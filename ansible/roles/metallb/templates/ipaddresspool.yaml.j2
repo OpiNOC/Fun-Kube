@@ -1,0 +1,8 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: fun-kube-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - {{ metallb_ip_pool }}

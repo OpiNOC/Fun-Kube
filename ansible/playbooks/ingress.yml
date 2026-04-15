@@ -1,0 +1,16 @@
+# Deploy Ingress controller
+---
+- name: Deploy Ingress
+  hosts: control_plane[0]
+  become: true
+  tasks:
+    - name: Include Traefik role
+      ansible.builtin.include_role:
+        name: traefik
+      when: ingress_type == "traefik"
+
+    - name: Include Nginx Proxy Manager role
+      ansible.builtin.include_role:
+        name: nginx-proxy-manager
+      when: ingress_type == "nginx-proxy-manager"
+  when: ingress_enabled | default(false) | bool

@@ -1,0 +1,7 @@
+# Deploy Calico CNI
+---
+- name: Deploy Calico
+  hosts: control_plane[0]
+  become: true
+  roles:
+    - calico

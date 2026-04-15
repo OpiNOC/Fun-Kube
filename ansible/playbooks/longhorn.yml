@@ -1,0 +1,8 @@
+# Deploy Longhorn
+---
+- name: Deploy Longhorn
+  hosts: control_plane[0]
+  become: true
+  roles:
+    - longhorn
+  when: longhorn_enabled | default(false) | bool

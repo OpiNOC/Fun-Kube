@@ -1,0 +1,95 @@
+# Initialize the first control-plane node
+---
+- name: Initialize first control-plane
+  hosts: control_plane[0]
+  become: true
+  tasks:
+    - name: Check if cluster is already initialized
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf
+
+    - name: Skip initialization if already done
+      ansible.builtin.debug:
+        msg: "Cluster already initialized, skipping kubeadm init."
+      when: admin_conf.stat.exists
+
+    - name: Resolve latest stable k8s version
+      ansible.builtin.uri:
+        url: https://dl.k8s.io/release/stable.txt
+        return_content: true
+      register: stable_version
+      when: k8s_version == "latest"
+
+    - name: Set resolved k8s version
+      ansible.builtin.set_fact:
+        k8s_version_resolved: "{{ stable_version.content | trim }}"
+      when: k8s_version == "latest"
+
+    - name: Use provided k8s version
+      ansible.builtin.set_fact:
+        k8s_version_resolved: "{{ k8s_version }}"
+      when: k8s_version != "latest"
+
+    - name: Run kubeadm init
+      ansible.builtin.command: |
+        kubeadm init \
+          --control-plane-endpoint "{{ api_endpoint }}:6443" \
+          --pod-network-cidr "{{ pod_cidr }}" \
+          --service-cidr "{{ service_cidr }}" \
+          --kubernetes-version "{{ k8s_version_resolved }}" \
+          --upload-certs
+      when: not admin_conf.stat.exists
+      changed_when: true
+
+    - name: Create .kube directory for ansible user
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.kube"
+        state: directory
+        mode: '0755'
+      when: not admin_conf.stat.exists
+
+    - name: Copy admin.conf to ansible user kubeconfig
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ ansible_env.HOME }}/.kube/config"
+        mode: '0600'
+        remote_src: true
+      when: not admin_conf.stat.exists
+
+    - name: Generate worker join command
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: worker_join_cmd
+      when: not admin_conf.stat.exists
+      changed_when: false
+
+    - name: Save worker join script
+      ansible.builtin.copy:
+        content: "{{ worker_join_cmd.stdout }}"
+        dest: /tmp/kubeadm-join-worker.sh
+        mode: '0755'
+      when: not admin_conf.stat.exists
+
+    - name: Generate control-plane certificate key
+      ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+      register: cert_key_output
+      when: not admin_conf.stat.exists
+      changed_when: false
+
+    - name: Extract certificate key
+      ansible.builtin.set_fact:
+        certificate_key: "{{ cert_key_output.stdout_lines | last }}"
+      when: not admin_conf.stat.exists
+
+    - name: Save control-plane join script
+      ansible.builtin.copy:
+        content: "{{ worker_join_cmd.stdout }} --control-plane --certificate-key {{ certificate_key }}"
+        dest: /tmp/kubeadm-join-cp.sh
+        mode: '0755'
+      when: not admin_conf.stat.exists
+
+    - name: Register join commands as facts
+      ansible.builtin.set_fact:
+        kubeadm_join_worker: "{{ worker_join_cmd.stdout }}"
+        kubeadm_join_cp: "{{ worker_join_cmd.stdout }} --control-plane --certificate-key {{ certificate_key }}"
+      when: not admin_conf.stat.exists

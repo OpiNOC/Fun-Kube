@@ -1,0 +1,57 @@
+# tasks file for traefik
+---
+- name: Check if helm is installed
+  ansible.builtin.command: which helm
+  register: helm_check
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+
+- name: Install Helm
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  when: helm_check.rc != 0
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true
+
+- name: Add Traefik Helm repository
+  ansible.builtin.command: helm repo add traefik https://traefik.github.io/charts
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true
+  ignore_errors: true
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true
+
+- name: Install Traefik
+  ansible.builtin.command: |
+    helm upgrade --install traefik traefik/traefik \
+      --namespace {{ traefik_namespace }} \
+      --create-namespace \
+      --set service.type=LoadBalancer
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: true
+
+- name: Wait for Traefik pods to be running
+  ansible.builtin.command: |
+    kubectl wait --for=condition=Ready pod --all -n {{ traefik_namespace }} --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  changed_when: false
+  ignore_errors: true
