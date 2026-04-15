@@ -2,7 +2,8 @@ Fun-Kube — Kubernetes Cluster Provisioning Tool
 
 Obiettivo
 
-Costruire un tool che permetta di creare cluster Kubernetes in modo automatizzato partendo da una macchina bootstrap con accesso SSH ai nodi.
+Costruire un tool che permetta di creare cluster Kubernetes in modo automatizzato
+partendo da una macchina bootstrap con accesso SSH ai nodi.
 
 Il tool deve:
   • richiedere il minimo numero di comandi all'utente (idealmente 1 comando)
@@ -15,15 +16,51 @@ Il tool deve:
   • eseguire controlli di prerequisiti prima del deploy
   • produrre output utile per troubleshooting e scaling
 
-Sistema target nodi: Ubuntu (22.04 / 24.04)
+Sistema target nodi: Ubuntu 22.04 / 24.04
 Macchina bootstrap: Ubuntu 22.04 / 24.04 (esterna al cluster, con accesso SSH ai nodi)
+
+⸻
+
+Stato del progetto
+
+  Componente                     Stato
+  ─────────────────────────────────────────────────────────
+  .env.example (config template) ✓ completo
+  fun_kube/config.py             ✓ completo (parsing, validazione, topologia)
+  fun_kube/preflight.py          ✓ completo (SSH checks sui nodi)
+  fun_kube/runner.py             ✓ completo (inventory, playbook sequence, kubeconfig)
+  fun_kube/cli.py                ✓ completo (up, check-deps)
+  fun_kube/deps.py               ✓ completo (verifica tool bootstrap machine)
+  bootstrap-setup.sh             ✓ completo (setup bootstrap machine)
+  ansible/ansible.cfg            ✓ completo
+  ansible/playbooks/ (10)        ✓ scaffolding completo (generato, non testato)
+  ansible/roles/ (9)             ✓ scaffolding completo (generato, non testato)
+  README.md                      ✗ da fare
+  Test reale su nodi             ✗ da fare
+
+Prossimi passi (priorità):
+  1. Scrivere README.md (quickstart, requisiti, esempi)
+  2. Primo test reale — topologia mononodo su VM singola
+  3. Fix bug emersi dal test (apt_key deprecato, run_once+register nel kubeadm role)
+  4. Test topologia single control-plane
+  5. Test topologia HA
+
+⸻
+
+Limitazioni note (v0.1.0, non bloccanti per ora)
+  • apt_key module deprecato su Ubuntu 24.04: da migrare a get_url nei roles
+    containerd e kubeadm
+  • Join scripts salvati in /tmp/: se il primo CP si riavvia prima del join dei
+    worker, vanno persi. Fix futuro: salvarli in /etc/kubernetes/
+  • kubeadm role: run_once + register — da verificare il comportamento su play
+    multi-host (la variabile potrebbe non propagarsi a tutti i nodi)
 
 ⸻
 
 Filosofia
   • Configurazione dichiarativa (.env = source of truth)
   • Automazione idempotente (Ansible)
-  • CLI semplice (Python)
+  • CLI semplice (Python + typer)
   • Modularità (addon attivabili/disattivabili)
   • Separazione tra cluster base e addon
 
@@ -31,14 +68,16 @@ Filosofia
 
 Topologie supportate
 
-  1. Mononodo — un singolo nodo fa sia control-plane che worker (utile per lab/dev)
-  2. Single control-plane — 1 control-plane + N worker (senza HA)
-  3. Multi control-plane HA — 3+ control-plane con keepalived (VIP) + N worker
+  Topologia           CP    Worker   Keepalived
+  ────────────────────────────────────────────
+  Mononodo            1     0        no
+  Single CP           1     N        no
+  HA multi CP         3+    N        sì (VIP obbligatorio)
 
-Il tool rileva automaticamente la topologia dal numero di control-plane definiti in cluster.yaml:
-  • 1 control-plane, 0 worker   → mononodo (taint rimosso automaticamente)
-  • 1 control-plane, N worker   → single control-plane
-  • 3+ control-plane, N worker  → HA con keepalived
+Rilevamento automatico dal numero di control-plane in .env:
+  • 1 CP, 0 worker  → mononodo (taint NoSchedule rimosso automaticamente)
+  • 1 CP, N worker  → single control-plane
+  • 3+ CP           → HA con keepalived
 
 ⸻
 
@@ -48,32 +87,31 @@ Fun-Kube gira su una macchina esterna al cluster (laptop, jump host, VM di manag
 che ha accesso SSH a tutti i nodi. NON è necessario installare nulla sui nodi prima
 di eseguire fun-kube: ci pensa il tool.
 
-Setup una tantum della macchina bootstrap:
+Setup una tantum:
 
   git clone https://github.com/OpiNOC/Fun-Kube
   cd Fun-Kube
   bash bootstrap-setup.sh
 
-Lo script installa automaticamente:
+Tool installati da bootstrap-setup.sh:
 
-  Tool             Usato per
-  ─────────────────────────────────────────────────────
-  Python 3.10+     runtime del CLI fun-kube
-  pip              gestione dipendenze Python
-  ansible          esecuzione playbook sui nodi
-  ansible-galaxy   gestione collections Ansible
-  community.general  collection Ansible (usata dai roles)
-  kubectl          verifica stato cluster post-deploy
-  helm             installazione Traefik (se abilitato)
-  ssh / scp        accesso ai nodi e fetch kubeconfig
-  git              clone del repo
+  Tool                 Usato per
+  ───────────────────────────────────────────────────────
+  Python 3.10+         runtime del CLI fun-kube
+  pip                  gestione dipendenze Python
+  ansible              esecuzione playbook sui nodi
+  community.general    collection Ansible usata dai roles
+  kubectl              verifica stato cluster post-deploy
+  helm                 installazione Traefik (se abilitato)
+  ssh / scp            accesso SSH ai nodi, fetch kubeconfig
+  git                  clone del repo
 
-Verifica manuale in qualsiasi momento:
+Verifica in qualsiasi momento:
 
-  ./fun-kube check-deps          # status sintetico
+  ./fun-kube check-deps            # status sintetico
   ./fun-kube check-deps --verbose  # con versioni
 
-fun-kube up esegue check-deps automaticamente all'avvio.
+fun-kube up esegue check-deps automaticamente come step 0.
 
 ⸻
 
@@ -83,248 +121,104 @@ Fun-Kube/
 ├── bootstrap-setup.sh        # setup una tantum macchina bootstrap
 ├── fun-kube                  # CLI entry point (eseguibile diretto)
 ├── pyproject.toml            # installabile via pip install -e .
-├── fun_kube/                 # package Python
+├── fun_kube/
 │   ├── __init__.py
 │   ├── cli.py                # comandi: up, check-deps
-│   ├── config.py             # parsing e validazione .env
+│   ├── config.py             # parsing .env, validazione, topologia
 │   ├── deps.py               # verifica tool sulla bootstrap machine
 │   ├── preflight.py          # preflight checks SSH sui nodi
-│   └── runner.py             # generazione inventory + esecuzione Ansible
-├── .env.example              # template con tutte le variabili (committato)
-├── .env                      # configurazione locale (NON committato)
+│   └── runner.py             # inventory generation + esecuzione Ansible
+├── .env.example              # template configurazione (committato)
+├── .env                      # configurazione locale (gitignored)
 ├── ansible/
-│   ├── ansible.cfg           # configurazione Ansible (roles_path, timeout, pipelining)
+│   ├── ansible.cfg           # roles_path, pipelining, forks, timeout
 │   ├── playbooks/
-│   │   ├── bootstrap.yml
-│   │   ├── keepalived.yml
-│   │   ├── kubeadm-init.yml
-│   │   ├── control-plane-join.yml
-│   │   ├── worker-join.yml
+│   │   ├── bootstrap.yml           # common + containerd + kubeadm su tutti i nodi
+│   │   ├── keepalived.yml          # HA only
+│   │   ├── kubeadm-init.yml        # init primo CP, salva join scripts
+│   │   ├── control-plane-join.yml  # join CP aggiuntivi (HA only)
+│   │   ├── worker-join.yml         # join workers
 │   │   ├── calico.yml
+│   │   ├── untaint-single-node.yml # mononodo only
 │   │   ├── metallb.yml
-│   │   ├── ingress.yml
+│   │   ├── ingress.yml             # traefik o nginx-proxy-manager
 │   │   └── longhorn.yml
 │   └── roles/
-│       ├── common/
-│       ├── containerd/
-│       ├── kubeadm/
-│       ├── keepalived/
+│       ├── common/           # sysctl, moduli kernel, swap, nfs-common
+│       ├── containerd/       # containerd.io + SystemdCgroup
+│       ├── kubeadm/          # kubelet + kubeadm + kubectl (versione pinned o latest)
+│       ├── keepalived/       # VIP MASTER/BACKUP
 │       ├── calico/
-│       ├── metallb/
-│       ├── traefik/
+│       ├── metallb/          # IPAddressPool + L2Advertisement
+│       ├── traefik/          # Helm install
 │       ├── nginx-proxy-manager/
-│       ├── longhorn/
-│       └── nfs/
-├── output/
+│       └── longhorn/
+├── output/                   # gitignored — generato da fun-kube up
+│   ├── inventory.ini
+│   ├── kubeconfig
 │   └── cluster-info.txt
-└── README.md
+└── KIMI-PROMPTS/             # gitignored — prompt per Kimi AI
 
 ⸻
 
 Configurazione cluster (.env)
 
-Il file .env è l'unica source of truth. Si parte sempre da .env.example:
-
   cp .env.example .env
-  # editare .env con i propri valori
+  # editare .env con i propri nodi e parametri
 
-Esempio (HA con 3 control-plane — vedere .env.example per tutte le opzioni):
+Variabili principali (vedere .env.example per la lista completa):
 
-  CLUSTER_NAME=mycluster
+  CLUSTER_NAME, NODE_N_IP/ROLE/HOSTNAME, SSH_USER, SSH_KEY_PATH
+  K8S_VERSION, POD_CIDR, SERVICE_CIDR, CNI
+  KEEPALIVED_ENABLED, KEEPALIVED_VIP, KEEPALIVED_INTERFACE
+  METALLB_ENABLED, METALLB_IP_POOL
+  INGRESS_ENABLED, INGRESS_TYPE
+  LONGHORN_ENABLED, LONGHORN_RWX
 
-  NODE_1_IP=10.0.0.1
-  NODE_1_ROLE=control-plane
-  NODE_1_HOSTNAME=cp1
-
-  NODE_2_IP=10.0.0.2
-  NODE_2_ROLE=control-plane
-  NODE_2_HOSTNAME=cp2
-
-  NODE_3_IP=10.0.0.3
-  NODE_3_ROLE=control-plane
-  NODE_3_HOSTNAME=cp3
-
-  NODE_4_IP=10.0.0.4
-  NODE_4_ROLE=worker
-  NODE_4_HOSTNAME=worker1
-
-  SSH_USER=ubuntu
-  SSH_KEY_PATH=~/.ssh/id_rsa
-
-  K8S_VERSION=latest
-  POD_CIDR=172.16.0.0/16
-  SERVICE_CIDR=10.96.0.0/12
-  CNI=calico
-
-  KEEPALIVED_ENABLED=true
-  KEEPALIVED_VIP=10.0.0.100
-  KEEPALIVED_INTERFACE=eth0
-
-  METALLB_ENABLED=true
-  METALLB_IP_POOL=10.0.0.200-10.0.0.220
-
-  INGRESS_ENABLED=true
-  INGRESS_TYPE=traefik
-
-  LONGHORN_ENABLED=true
-  LONGHORN_RWX=true
+CIDR da tenere non sovrapposti:
+  POD_CIDR, SERVICE_CIDR, METALLB_IP_POOL — config.py lo verifica all'avvio.
 
 ⸻
 
 CLI
 
-Comando principale:
+  fun-kube up [.env]           # provisiona il cluster
+    --dry-run                  # solo validazione, nessuna modifica
+    --debug                    # output verboso (ansible -vv)
+    --skip-checks              # salta preflight SSH (non consigliato)
 
-  fun-kube up            # legge .env nella directory corrente
-  fun-kube up /path/.env # .env alternativo
-
-Opzioni:
-
-  --dry-run        esegue solo validazioni
-  --debug          output verboso
-  --skip-checks    salta preflight (non consigliato)
+  fun-kube check-deps          # verifica tool sulla bootstrap machine
+    --verbose                  # mostra versioni
 
 ⸻
 
-Flusso operativo
+Flusso operativo (fun-kube up)
 
-  1. Validazione configurazione
-     • YAML valido
-     • topologia coerente (regole per mononodo / single / HA)
-     • almeno un control-plane
-     • IP e hostname duplicati
-     • campi obbligatori presenti
-     • keepalived.vip nella stessa subnet dei nodi (se HA)
-     • MetalLB ip_pool non sovrapposto a pod_cidr / service_cidr
-
-  2. Prompt interattivo (solo se necessario)
-     • ssh key mancante
-     • utente non specificato
-
-  3. Preflight checks via SSH su tutti i nodi
-     • accesso SSH funzionante
-     • sudo senza password
-     • swap disabilitato
-     • moduli kernel (br_netfilter, overlay)
-     • porte libere
-     • hostname univoci
-     • connettività tra nodi
-     • container runtime presente o installabile
-
-  4. Bootstrap nodi (Ansible)
-     • install containerd
-     • configurazione sysctl
-     • disable swap
-     • install nfs-common (sempre)
-
-  5. Keepalived (solo se HA)
-     • install keepalived su tutti i control-plane
-     • configurazione MASTER sul primo, BACKUP sugli altri
-     • il VIP diventa il --control-plane-endpoint di kubeadm
-
-  6. Install Kubernetes
-     • recupero versione stabile (se version=latest) via API release
-     • install kubeadm, kubelet, kubectl
-
-  7. Init primo control plane
-     • kubeadm init con --control-plane-endpoint (VIP se HA, IP nodo se single)
-     • salvataggio join token e certificate key
-     • recupero kubeconfig
-
-  8. Join control plane aggiuntivi (solo se HA)
-
-  9. Join worker
-
-  10. Install CNI (Calico)
-
-  11. Mononodo: rimozione taint control-plane per schedulare workload
-
-  12. Install addon (se abilitati)
-      • MetalLB
-      • Ingress
-      • Longhorn
-
-  13. Generazione output finale
-
-⸻
-
-Addon
-
-MetalLB
-  • deploy manifest ufficiale
-  • configurazione IPAddressPool
-  • validazione:
-    • IP nella stessa subnet dei nodi
-    • IP non sovrapposti a pod_cidr o service_cidr
-
-⸻
-
-Ingress
-
-Opzioni:
-  1. Traefik (default)
-     • install via Helm
-     • esposizione LoadBalancer
-  2. Nginx Proxy Manager
-     • deploy via manifest o Helm
-     • UI disponibile
-
-⸻
-
-Longhorn
-  • install via manifest ufficiale
-  • prerequisiti:
-    • nfs-common installato
-    • spazio disco disponibile
-  • RWX tramite share manager (NFS interno)
-
-⸻
-
-Output finale (output/cluster-info.txt)
-
-Deve contenere:
-  1. kubeconfig
-       export KUBECONFIG=./kubeconfig
-
-  2. stato cluster
-       kubectl get nodes
-       kubectl get pods -A
-
-  3. comandi join
-       worker:        kubeadm join <API_SERVER> --token ...
-       control-plane: kubeadm join ... --control-plane --certificate-key ...
-
-  4. troubleshooting
-       kubectl describe node <name>
-       journalctl -u kubelet -f
-       crictl ps
-
-  5. networking
-       MetalLB IP pool configurato
-       Keepalived VIP (se HA)
-
-  6. ingress
-       URL dashboard (Traefik o NPM)
-
-  7. storage
-       URL Longhorn UI
+  0. check-deps          verifica tool sulla bootstrap machine
+  1. Configurazione      parsing .env, validazione, rilevamento topologia
+  2. Preflight SSH       checks su tutti i nodi (swap, moduli, porte, disco, ping)
+  3. Provisioning        playbook Ansible in sequenza:
+       bootstrap → [keepalived] → kubeadm-init → [cp-join] → [worker-join]
+       → calico → [untaint] → [metallb] → [ingress] → [longhorn]
+  4. Output              inventory.ini, kubeconfig, cluster-info.txt
 
 ⸻
 
 Requisiti nodi
   • Ubuntu 22.04 o 24.04
   • CPU >= 2 core
-  • RAM >= 2GB (worker), 4GB (control-plane consigliato)
-  • swap disabilitato
-  • accesso SSH
+  • RAM >= 2 GB (worker), >= 4 GB (control-plane raccomandato)
+  • Disco >= 20 GB
+  • swap disabilitato (o disabilitabile)
+  • accesso SSH con chiave
   • sudo senza password
 
 ⸻
 
 Considerazioni importanti
-  • Kubernetes version "latest" risolta dinamicamente ma salvata in output
-  • Il sistema deve essere idempotente (rilanciabile senza effetti collaterali)
-  • Logging su file + stdout
-  • Errori chiari e azionabili
-  • Separare sempre cluster base e addon
-  • Keepalived VIP deve essere un IP libero sulla subnet dei nodi (non assegnato ad alcun nodo)
+  • Idempotente: ogni run controlla lo stato prima di agire (kubeadm già init → skip)
+  • K8s version "latest" risolta da dl.k8s.io/release/stable.txt e salvata in output
+  • Logging su stdout con rich; output persistente in output/cluster-info.txt
+  • MetalLB pool deve essere sulla subnet dei nodi, fuori da POD_CIDR e SERVICE_CIDR
+  • Keepalived VIP = IP libero sulla subnet dei nodi (non assegnato ad alcun nodo)
+  • Ansible gira dalla dir ansible/ così ansible.cfg viene rilevato automaticamente
