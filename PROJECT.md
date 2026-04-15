@@ -15,7 +15,8 @@ Il tool deve:
   • eseguire controlli di prerequisiti prima del deploy
   • produrre output utile per troubleshooting e scaling
 
-Sistema target: Ubuntu (22.04 / 24.04)
+Sistema target nodi: Ubuntu (22.04 / 24.04)
+Macchina bootstrap: Ubuntu 22.04 / 24.04 (esterna al cluster, con accesso SSH ai nodi)
 
 ⸻
 
@@ -41,20 +42,58 @@ Il tool rileva automaticamente la topologia dal numero di control-plane definiti
 
 ⸻
 
+Macchina bootstrap
+
+Fun-Kube gira su una macchina esterna al cluster (laptop, jump host, VM di management)
+che ha accesso SSH a tutti i nodi. NON è necessario installare nulla sui nodi prima
+di eseguire fun-kube: ci pensa il tool.
+
+Setup una tantum della macchina bootstrap:
+
+  git clone https://github.com/OpiNOC/Fun-Kube
+  cd Fun-Kube
+  bash bootstrap-setup.sh
+
+Lo script installa automaticamente:
+
+  Tool             Usato per
+  ─────────────────────────────────────────────────────
+  Python 3.10+     runtime del CLI fun-kube
+  pip              gestione dipendenze Python
+  ansible          esecuzione playbook sui nodi
+  ansible-galaxy   gestione collections Ansible
+  community.general  collection Ansible (usata dai roles)
+  kubectl          verifica stato cluster post-deploy
+  helm             installazione Traefik (se abilitato)
+  ssh / scp        accesso ai nodi e fetch kubeconfig
+  git              clone del repo
+
+Verifica manuale in qualsiasi momento:
+
+  ./fun-kube check-deps          # status sintetico
+  ./fun-kube check-deps --verbose  # con versioni
+
+fun-kube up esegue check-deps automaticamente all'avvio.
+
+⸻
+
 Struttura del progetto
 
 Fun-Kube/
-├── fun-kube                  # CLI entry point (Python)
+├── bootstrap-setup.sh        # setup una tantum macchina bootstrap
+├── fun-kube                  # CLI entry point (eseguibile diretto)
+├── pyproject.toml            # installabile via pip install -e .
 ├── fun_kube/                 # package Python
 │   ├── __init__.py
-│   ├── cli.py
+│   ├── cli.py                # comandi: up, check-deps
 │   ├── config.py             # parsing e validazione .env
-│   ├── preflight.py          # preflight checks via SSH
-│   └── runner.py             # esecuzione playbook Ansible
+│   ├── deps.py               # verifica tool sulla bootstrap machine
+│   ├── preflight.py          # preflight checks SSH sui nodi
+│   └── runner.py             # generazione inventory + esecuzione Ansible
 ├── .env.example              # template con tutte le variabili (committato)
 ├── .env                      # configurazione locale (NON committato)
 ├── ansible/
-│   ├── inventory.py          # dynamic inventory da cluster.yaml
+│   ├── ansible.cfg           # configurazione Ansible (roles_path, timeout, pipelining)
 │   ├── playbooks/
 │   │   ├── bootstrap.yml
 │   │   ├── keepalived.yml

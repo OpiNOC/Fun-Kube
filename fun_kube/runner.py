@@ -44,7 +44,8 @@ _PLAYBOOK_SEQUENCE: dict[Topology, List[str]] = {
     ],
 }
 
-_PLAYBOOK_DIR = Path(__file__).parent.parent / "ansible" / "playbooks"
+_ANSIBLE_DIR  = Path(__file__).parent.parent / "ansible"
+_PLAYBOOK_DIR = _ANSIBLE_DIR / "playbooks"
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +229,8 @@ def _run_playbook(pb: Path, inventory: Path, extra_vars: dict, debug: bool) -> N
     if debug:
         cmd.append("-vv")
 
-    result = subprocess.run(cmd, text=True)
+    # Esegue dalla directory ansible/ così ansible.cfg viene rilevato automaticamente
+    result = subprocess.run(cmd, text=True, cwd=str(_ANSIBLE_DIR))
     if result.returncode != 0:
         raise RunnerError(
             f"Il playbook {pb.name} è terminato con codice {result.returncode}"

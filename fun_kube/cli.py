@@ -11,7 +11,8 @@ from rich.panel import Panel
 
 from . import config as cfg_module
 from .config import ConfigError
-from . import preflight, runner
+from . import preflight, runner, deps
+from .deps import DepsError
 
 app = typer.Typer(
     name="fun-kube",
@@ -38,6 +39,14 @@ def up(
         "[bold cyan]Fun-Kube[/] — Kubernetes Cluster Provisioner",
         expand=False,
     ))
+
+    # --- 0. Dipendenze bootstrap machine ---
+    console.print("\n[bold]0/4  Verifica dipendenze bootstrap machine...[/]")
+    try:
+        deps.run(verbose=debug)
+    except DepsError as e:
+        err.print(f"\n[red]Dipendenze mancanti:[/]\n{e}")
+        raise typer.Exit(1)
 
     # --- 1. Configurazione ---
     console.print("\n[bold]1/4  Caricamento configurazione...[/]")
@@ -99,6 +108,24 @@ def up(
     console.print(f"\n[bold green]✓ Cluster '{cluster.cluster_name}' pronto![/]")
     console.print(f"  Output   : {cluster.output_dir}/cluster-info.txt")
     console.print(f"  Kubeconfig: export KUBECONFIG={cluster.output_dir}/kubeconfig\n")
+
+
+@app.command(name="check-deps")
+def check_deps(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Mostra versioni"),
+) -> None:
+    """Verifica che tutti i tool necessari siano installati sulla macchina bootstrap."""
+    console.print(Panel(
+        "[bold cyan]Fun-Kube[/] — Bootstrap machine dependency check",
+        expand=False,
+    ))
+    console.print()
+    try:
+        deps.run(verbose=verbose)
+        console.print("\n[bold green]✓ Tutte le dipendenze sono soddisfatte.[/]")
+    except DepsError as e:
+        Console(stderr=True).print(f"\n[red]{e}[/]")
+        raise typer.Exit(1)
 
 
 def main() -> None:
