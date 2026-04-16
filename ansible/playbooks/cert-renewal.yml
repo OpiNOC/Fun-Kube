@@ -1,0 +1,7 @@
+# Installa il timer di rinnovo automatico certificati su tutti i nodi control-plane
+---
+- name: Deploy certificate auto-renewal timer
+  hosts: control_plane
+  become: true
+  roles:
+    - cert-renewal

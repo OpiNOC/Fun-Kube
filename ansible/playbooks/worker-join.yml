@@ -4,21 +4,17 @@
   hosts: workers
   become: true
   tasks:
-    - name: Read worker join command from first CP
-      ansible.builtin.command: cat /tmp/kubeadm-join-worker.sh
-      delegate_to: "{{ first_cp_hostname }}"
-      register: worker_join_cmd_raw
-      changed_when: false
-
     - name: Check if already joined
       ansible.builtin.stat:
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf
 
-    - name: Skip if already joined
-      ansible.builtin.debug:
-        msg: "Node already joined, skipping."
-      when: kubelet_conf.stat.exists
+    - name: Read worker join command from first CP
+      ansible.builtin.command: cat /etc/kubernetes/kubeadm-join-worker.sh
+      delegate_to: "{{ first_cp_hostname }}"
+      register: worker_join_cmd_raw
+      changed_when: false
+      when: not kubelet_conf.stat.exists
 
     - name: Join worker node
       ansible.builtin.command: "{{ worker_join_cmd_raw.stdout }}"

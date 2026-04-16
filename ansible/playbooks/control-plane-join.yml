@@ -1,24 +1,20 @@
-# Join additional control-plane nodes
+# Join additional control-plane nodes (HA only)
 ---
 - name: Join additional control-planes
   hosts: control_plane[1:]
   become: true
   tasks:
-    - name: Read control-plane join command from first CP
-      ansible.builtin.command: cat /tmp/kubeadm-join-cp.sh
-      delegate_to: "{{ first_cp_hostname }}"
-      register: cp_join_cmd_raw
-      changed_when: false
-
     - name: Check if already joined
       ansible.builtin.stat:
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf
 
-    - name: Skip if already joined
-      ansible.builtin.debug:
-        msg: "Node already joined, skipping."
-      when: kubelet_conf.stat.exists
+    - name: Read control-plane join command from first CP
+      ansible.builtin.command: cat /etc/kubernetes/kubeadm-join-cp.sh
+      delegate_to: "{{ first_cp_hostname }}"
+      register: cp_join_cmd_raw
+      changed_when: false
+      when: not kubelet_conf.stat.exists
 
     - name: Join control-plane node
       ansible.builtin.command: "{{ cp_join_cmd_raw.stdout }}"

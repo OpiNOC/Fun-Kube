@@ -1,0 +1,8 @@
+---
+- name: Enable and start cert-renewal timer
+  ansible.builtin.systemd:
+    name: k8s-cert-renew.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true

@@ -1,0 +1,9 @@
+[Unit]
+Description=Kubernetes certificate renewal
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/k8s-cert-renew.sh
+StandardOutput=journal
+StandardError=journal

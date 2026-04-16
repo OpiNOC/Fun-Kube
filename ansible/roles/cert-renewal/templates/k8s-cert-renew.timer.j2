@@ -1,0 +1,12 @@
+[Unit]
+Description=Rinnovo mensile certificati Kubernetes
+Requires=k8s-cert-renew.service
+
+[Timer]
+OnCalendar=monthly
+# I nodi HA rinnovano in finestre diverse (spread fino a 1h) per evitare restart simultanei
+RandomizedDelaySec={{ '3600' if topology == 'ha' else '0' }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

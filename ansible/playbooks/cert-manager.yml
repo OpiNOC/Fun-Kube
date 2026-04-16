@@ -1,0 +1,7 @@
+# Install cert-manager (core cluster component)
+---
+- name: Install cert-manager
+  hosts: control_plane[0]
+  become: true
+  roles:
+    - cert-manager

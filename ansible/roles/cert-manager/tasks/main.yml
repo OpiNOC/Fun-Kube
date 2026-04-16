@@ -1,0 +1,22 @@
+# tasks file for cert-manager
+---
+- name: Download cert-manager manifest
+  ansible.builtin.get_url:
+    url: "https://github.com/cert-manager/cert-manager/releases/download/{{ cert_manager_version }}/cert-manager.yaml"
+    dest: /tmp/cert-manager.yaml
+    mode: '0644'
+    force: false
+
+- name: Apply cert-manager manifest
+  ansible.builtin.command: kubectl apply -f /tmp/cert-manager.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+
+- name: Wait for cert-manager webhook to be ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=Available deployment/cert-manager-webhook
+    -n cert-manager --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false

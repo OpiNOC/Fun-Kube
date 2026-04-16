@@ -1,0 +1,32 @@
+# tasks file for local-path-provisioner
+# Storage leggero per cluster mononodo — crea PV come directory su disco locale.
+---
+- name: Download local-path-provisioner manifest
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/rancher/local-path-provisioner/{{ local_path_provisioner_version }}/deploy/local-path-storage.yaml"
+    dest: /tmp/local-path-storage.yaml
+    mode: '0644'
+    force: false
+
+- name: Apply local-path-provisioner
+  ansible.builtin.command: kubectl apply -f /tmp/local-path-storage.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+
+- name: Wait for local-path-provisioner to be ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=Available deployment/local-path-provisioner
+    -n local-path-storage --timeout=120s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Set local-path as default StorageClass
+  ansible.builtin.command: >
+    kubectl patch storageclass local-path
+    -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+  ignore_errors: true

@@ -1,0 +1,28 @@
+# tasks file for cert-renewal
+---
+- name: Deploy certificate renewal script
+  ansible.builtin.template:
+    src: k8s-cert-renew.sh.j2
+    dest: /usr/local/bin/k8s-cert-renew.sh
+    mode: '0700'
+    owner: root
+    group: root
+  become: true
+
+- name: Deploy systemd service
+  ansible.builtin.template:
+    src: k8s-cert-renew.service.j2
+    dest: /etc/systemd/system/k8s-cert-renew.service
+    mode: '0644'
+  become: true
+
+- name: Deploy systemd timer
+  ansible.builtin.template:
+    src: k8s-cert-renew.timer.j2
+    dest: /etc/systemd/system/k8s-cert-renew.timer
+    mode: '0644'
+  become: true
+  notify: Enable and start cert-renewal timer
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

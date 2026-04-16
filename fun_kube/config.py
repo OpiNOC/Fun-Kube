@@ -69,6 +69,9 @@ class ClusterConfig:
     topology: Topology
     output_dir: Path
     log_level: str
+    cert_manager_version: str
+    api_server_extra_sans: List[str]
+    local_node: bool
 
     @property
     def control_planes(self) -> List[NodeConfig]:
@@ -81,6 +84,11 @@ class ClusterConfig:
     @property
     def first_cp(self) -> NodeConfig:
         return self.control_planes[0]
+
+    @property
+    def untaint_cp(self) -> bool:
+        """True se non ci sono worker dedicati: i nodi CP devono anche schedulare workload."""
+        return len(self.workers) == 0
 
     @property
     def api_endpoint(self) -> str:
@@ -105,12 +113,26 @@ def load(env_file: Path) -> ClusterConfig:
     nodes = _parse_nodes(env)
     topology = _detect_topology(nodes)
     keepalived = _parse_keepalived(env, topology)
+    local_node = _bool(env, "LOCAL_NODE")
+
+    # SSH credentials: obbligatori solo se non local_node
+    if local_node:
+        ssh_user = env.get("SSH_USER", "root").strip()
+        ssh_key_path = Path("")
+    else:
+        ssh_user = _require(env, "SSH_USER")
+        ssh_key_path = Path(os.path.expanduser(_require(env, "SSH_KEY_PATH")))
+
+    extra_sans = _parse_extra_sans(env)
+    # In local_node aggiungiamo 127.0.0.1 automaticamente per comodità
+    if local_node and "127.0.0.1" not in extra_sans:
+        extra_sans = extra_sans + ["127.0.0.1"]
 
     cfg = ClusterConfig(
         cluster_name=_require(env, "CLUSTER_NAME"),
         nodes=nodes,
-        ssh_user=_require(env, "SSH_USER"),
-        ssh_key_path=Path(os.path.expanduser(_require(env, "SSH_KEY_PATH"))),
+        ssh_user=ssh_user,
+        ssh_key_path=ssh_key_path,
         k8s_version=env.get("K8S_VERSION", "latest"),
         pod_cidr=_require(env, "POD_CIDR"),
         service_cidr=env.get("SERVICE_CIDR", "10.96.0.0/12"),
@@ -128,6 +150,9 @@ def load(env_file: Path) -> ClusterConfig:
         topology=topology,
         output_dir=Path(env.get("OUTPUT_DIR", "./output")),
         log_level=env.get("LOG_LEVEL", "info").lower(),
+        cert_manager_version=env.get("CERT_MANAGER_VERSION", "v1.17.2"),
+        api_server_extra_sans=extra_sans,
+        local_node=local_node,
     )
 
     _validate(cfg)
@@ -204,6 +229,13 @@ def _parse_keepalived(env: dict, topology: Topology) -> KeepalivedConfig:
     )
 
 
+def _parse_extra_sans(env: dict) -> List[str]:
+    raw = env.get("API_SERVER_EXTRA_SANS", "").strip()
+    if not raw:
+        return []
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
 def _parse_ingress(env: dict) -> IngressConfig:
     enabled = _bool(env, "INGRESS_ENABLED")
     ingress_type = env.get("INGRESS_TYPE", "traefik").strip().lower()
@@ -221,6 +253,13 @@ def _parse_ingress(env: dict) -> IngressConfig:
 def _validate(cfg: ClusterConfig) -> None:
     errors: List[str] = []
 
+    # local_node: solo single-node
+    if cfg.local_node and cfg.topology != "single-node":
+        errors.append(
+            "LOCAL_NODE=true è compatibile solo con topologia single-node "
+            "(1 control-plane, nessun worker)."
+        )
+
     # IP duplicati
     ips = [n.ip for n in cfg.nodes]
     if len(ips) != len(set(ips)):
@@ -231,8 +270,8 @@ def _validate(cfg: ClusterConfig) -> None:
     if len(hostnames) != len(set(hostnames)):
         errors.append("Hostname duplicati tra i nodi.")
 
-    # SSH key
-    if not cfg.ssh_key_path.exists():
+    # SSH key (non richiesta in local_node)
+    if not cfg.local_node and not cfg.ssh_key_path.exists():
         errors.append(f"SSH_KEY_PATH non trovato: {cfg.ssh_key_path}")
 
     # Keepalived VIP obbligatorio in HA

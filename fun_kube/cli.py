@@ -75,6 +75,8 @@ def up(
     console.print(f"  Cluster   : [cyan]{cluster.cluster_name}[/]")
     console.print(f"  Topologia : [cyan]{topology_label}[/]")
     console.print(f"  Nodi      : {len(cluster.control_planes)} control-plane, {len(cluster.workers)} worker")
+    if cluster.local_node:
+        console.print(f"  Modalità  : [yellow]local-node[/] (bootstrap = nodo)")
     console.print(f"  K8s       : {cluster.k8s_version}")
     console.print(f"  Addons    : {', '.join(addons) if addons else 'nessuno'}")
 
@@ -94,9 +96,9 @@ def up(
         console.print("\n[yellow]  ⚠  Preflight checks saltati.[/]")
 
     # --- 3. Provisioning ---
-    console.print("\n[bold]3/4  Provisioning cluster...[/]")
+    console.print("\n[bold]3/4  Provisioning cluster core...[/]")
     try:
-        runner.run(cluster, debug=debug)
+        runner.run_core(cluster, debug=debug)
     except runner.RunnerError as e:
         err.print(f"\n[red]Provisioning fallito:[/]\n{e}")
         raise typer.Exit(1)
@@ -106,8 +108,11 @@ def up(
     runner.write_output(cluster)
 
     console.print(f"\n[bold green]✓ Cluster '{cluster.cluster_name}' pronto![/]")
-    console.print(f"  Output   : {cluster.output_dir}/cluster-info.txt")
-    console.print(f"  Kubeconfig: export KUBECONFIG={cluster.output_dir}/kubeconfig\n")
+    console.print(f"  Kubeconfig primario  : /root/.kube/{cluster.cluster_name}  [green](non scade)[/]")
+    console.print(f"  Kubeconfig emergenza : /root/.kube/{cluster.cluster_name}-admin  [yellow](~1 anno)[/]")
+    console.print(f"  Info manutenzione    : /root/{cluster.cluster_name}-manutenzione.txt")
+    console.print(f"  Output progetto      : {cluster.output_dir}/cluster-info.txt")
+    console.print(f"\n  [yellow]Applica alias e kubeconfig:[/]  source ~/.bashrc\n")
 
 
 @app.command(name="check-deps")

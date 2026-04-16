@@ -1,38 +1,30 @@
 # tasks file for kubeadm
+# Nota: k8s_version_resolved è risolto dal runner Python e passato come extra_var.
 ---
-- name: Resolve latest stable k8s minor version
-  ansible.builtin.uri:
-    url: https://dl.k8s.io/release/stable.txt
-    return_content: true
-  register: k8s_stable_version
-  when: k8s_version == "latest"
-  run_once: true
-
-- name: Set resolved k8s version fact
-  ansible.builtin.set_fact:
-    k8s_version_resolved: "{{ k8s_stable_version.content | trim }}"
-  when: k8s_version == "latest"
-
-- name: Use provided k8s version
-  ansible.builtin.set_fact:
-    k8s_version_resolved: "{{ k8s_version }}"
-  when: k8s_version != "latest"
-
 - name: Determine k8s minor version for repo
   ansible.builtin.set_fact:
     k8s_minor_version: "{{ k8s_version_resolved | regex_replace('^v?(\\d+\\.\\d+).*', '\\1') }}"
 
-- name: Add Kubernetes GPG key
-  ansible.builtin.apt_key:
+- name: Ensure /etc/apt/keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Download Kubernetes GPG key
+  ansible.builtin.get_url:
     url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/deb/Release.key"
-    keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    dest: "/etc/apt/keyrings/kubernetes-{{ k8s_minor_version }}.asc"
+    mode: '0644'
+    force: false
   become: true
 
 - name: Add Kubernetes apt repository
   ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/deb/ /"
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-{{ k8s_minor_version }}.asc] https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/deb/ /"
     state: present
-    filename: kubernetes
+    filename: "kubernetes-{{ k8s_minor_version }}"
   become: true
 
 - name: Install kubelet, kubeadm and kubectl

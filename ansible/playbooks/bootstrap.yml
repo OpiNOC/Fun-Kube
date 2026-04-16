@@ -7,3 +7,14 @@
     - common
     - containerd
     - kubeadm
+
+- name: Prepare Longhorn data directory
+  hosts: all
+  become: true
+  tasks:
+    - name: Create /var/lib/longhorn with correct permissions
+      ansible.builtin.file:
+        path: /var/lib/longhorn
+        state: directory
+        mode: '0777'
+  when: longhorn_enabled | bool

@@ -1,0 +1,32 @@
+#!/bin/bash
+# Rinnovo automatico certificati Kubernetes
+# Gestito da Fun-Kube — non modificare manualmente
+set -euo pipefail
+
+MANIFESTS_DIR=/etc/kubernetes/manifests
+BACKUP_DIR=/tmp/k8s-manifests-backup-$(date +%Y%m%d%H%M%S)
+LOG_PREFIX="[k8s-cert-renew]"
+
+echo "$LOG_PREFIX Inizio rinnovo certificati: $(date)"
+
+kubeadm certs renew all
+echo "$LOG_PREFIX Certificati rinnovati"
+
+mkdir -p "$BACKUP_DIR"
+echo "$LOG_PREFIX Spostamento manifest in $BACKUP_DIR"
+mv "$MANIFESTS_DIR/kube-apiserver.yaml" \
+   "$MANIFESTS_DIR/kube-controller-manager.yaml" \
+   "$MANIFESTS_DIR/kube-scheduler.yaml" \
+   "$BACKUP_DIR/"
+
+echo "$LOG_PREFIX Attesa stop componenti..."
+sleep 20
+
+echo "$LOG_PREFIX Ripristino manifest"
+mv "$BACKUP_DIR"/*.yaml "$MANIFESTS_DIR/"
+
+echo "$LOG_PREFIX Attesa restart API server..."
+sleep 30
+
+echo "$LOG_PREFIX Rinnovo completato: $(date)"
+kubeadm certs check-expiration

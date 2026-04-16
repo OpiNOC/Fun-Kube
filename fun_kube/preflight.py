@@ -34,8 +34,10 @@ class CheckResult:
 
 def run(cluster: ClusterConfig, debug: bool = False) -> None:
     """Esegue tutti i preflight checks. Solleva PreflightError se qualcuno fallisce."""
-    results: List[CheckResult] = []
+    if cluster.local_node:
+        console.print("  [dim]Modalità local-node: preflight eseguito in locale[/]")
 
+    results: List[CheckResult] = []
     for node in cluster.nodes:
         results.extend(_check_node(node, cluster, debug))
 
@@ -52,14 +54,39 @@ def run(cluster: ClusterConfig, debug: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 def _check_node(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> List[CheckResult]:
+    if cluster.local_node:
+        return _check_node_local(node, debug)
+    return _check_node_ssh(node, cluster, debug)
+
+
+def _check_node_local(node: NodeConfig, debug: bool) -> List[CheckResult]:
+    """Preflight checks eseguiti localmente (local_node=true)."""
+    results = []
+
+    def check(name: str, cmd: str, ok_fn=None) -> CheckResult:
+        rc, out, err = _local(cmd, debug)
+        ok = ok_fn(rc, out) if ok_fn is not None else rc == 0
+        detail = (out + " " + err).strip()[:120] if not ok else ""
+        return CheckResult(node=node.hostname, check=name, ok=ok, detail=detail)
+
+    results.append(check("swap disabled", "swapon --show",
+                         ok_fn=lambda rc, out: out.strip() == ""))
+    results.append(check("disk >= 10GB free",
+                         "df / | awk 'NR==2 {exit ($4 < 10485760)}'"))
+    results.append(check("port 6443 free",
+                         "! ss -tlnp 2>/dev/null | grep -q ':6443 '"))
+    results.append(check("port 2379-2380 free",
+                         "! ss -tlnp 2>/dev/null | grep -qE ':(2379|2380) '"))
+    return results
+
+
+def _check_node_ssh(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> List[CheckResult]:
+    """Preflight checks via SSH (topologie remote)."""
     results = []
 
     def check(name: str, cmd: str, ok_fn=None) -> CheckResult:
         rc, out, err = _ssh(node, cluster, cmd, debug)
-        if ok_fn is not None:
-            ok = ok_fn(rc, out)
-        else:
-            ok = rc == 0
+        ok = ok_fn(rc, out) if ok_fn is not None else rc == 0
         detail = (out + " " + err).strip()[:120] if not ok else ""
         return CheckResult(node=node.hostname, check=name, ok=ok, detail=detail)
 
@@ -68,38 +95,20 @@ def _check_node(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> List[C
     if not results[-1].ok:
         return results
 
-    # sudo senza password
     results.append(check("sudo no-password", "sudo -n true"))
-
-    # swap disabilitato (swapon --show deve essere vuoto)
-    results.append(check(
-        "swap disabled",
-        "swapon --show",
-        ok_fn=lambda rc, out: out.strip() == "",
-    ))
-
-    # moduli kernel
+    results.append(check("swap disabled", "swapon --show",
+                         ok_fn=lambda rc, out: out.strip() == ""))
     results.append(check("kernel: br_netfilter", "lsmod | grep -q br_netfilter"))
     results.append(check("kernel: overlay", "lsmod | grep -q overlay"))
+    results.append(check("disk >= 10GB free",
+                         "df / | awk 'NR==2 {exit ($4 < 10485760)}'"))
 
-    # spazio disco >= 10 GB liberi su /
-    results.append(check(
-        "disk >= 10GB free",
-        "df / | awk 'NR==2 {exit ($4 < 10485760)}'",
-    ))
-
-    # porte critiche libere (solo control-plane)
     if node.role == "control-plane":
-        results.append(check(
-            "port 6443 free",
-            "! ss -tlnp 2>/dev/null | grep -q ':6443 '",
-        ))
-        results.append(check(
-            "port 2379-2380 free",
-            "! ss -tlnp 2>/dev/null | grep -qE ':(2379|2380) '",
-        ))
+        results.append(check("port 6443 free",
+                             "! ss -tlnp 2>/dev/null | grep -q ':6443 '"))
+        results.append(check("port 2379-2380 free",
+                             "! ss -tlnp 2>/dev/null | grep -qE ':(2379|2380) '"))
 
-    # connettività verso gli altri nodi (ping)
     other_ips = [n.ip for n in cluster.nodes if n.ip != node.ip]
     if other_ips:
         ping_cmd = " && ".join(f"ping -c1 -W2 {ip} >/dev/null 2>&1" for ip in other_ips)
@@ -109,8 +118,22 @@ def _check_node(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> List[C
 
 
 # ---------------------------------------------------------------------------
-# SSH helper
+# Runner helpers
 # ---------------------------------------------------------------------------
+
+def _local(cmd: str, debug: bool) -> Tuple[int, str, str]:
+    if debug:
+        console.print(f"  [dim]→ local: {cmd}[/]")
+    try:
+        result = subprocess.run(
+            ["bash", "-c", cmd], capture_output=True, text=True, timeout=30
+        )
+        return result.returncode, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        return 1, "", "timeout"
+    except Exception as e:
+        return 1, "", str(e)
+
 
 def _ssh(node: NodeConfig, cluster: ClusterConfig, cmd: str, debug: bool) -> Tuple[int, str, str]:
     ssh_cmd = [

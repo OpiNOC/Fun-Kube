@@ -1,0 +1,8 @@
+# Installa local-path-provisioner come StorageClass di default.
+# Eseguito automaticamente su topologia mononodo (local-node e single-node).
+---
+- name: Install local-path-provisioner
+  hosts: control_plane[0]
+  become: true
+  roles:
+    - local-path-provisioner

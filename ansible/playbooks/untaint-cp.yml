@@ -1,0 +1,15 @@
+# Rimuove il taint NoSchedule dai nodi control-plane.
+# Eseguito automaticamente quando non ci sono worker dedicati
+# (tutti i nodi CP devono anche schedulare workload).
+---
+- name: Untaint control-plane nodes
+  hosts: control_plane[0]
+  become: true
+  tasks:
+    - name: Remove NoSchedule taint from all control-plane nodes
+      ansible.builtin.command: >
+        kubectl taint nodes --all node-role.kubernetes.io/control-plane:NoSchedule-
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+      ignore_errors: true

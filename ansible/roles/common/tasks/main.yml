@@ -63,6 +63,14 @@
       - gnupg
       - lsb-release
       - nfs-common
+      - open-iscsi
     state: present
     update_cache: true
+  become: true
+
+- name: Enable and start iscsid (required by Longhorn)
+  ansible.builtin.systemd:
+    name: iscsid
+    enabled: true
+    state: started
   become: true
