@@ -347,7 +347,7 @@ def _write_inventory(cluster: ClusterConfig) -> Path:
     if not cluster.local_node:
         lines.append("ansible_ssh_common_args='-o StrictHostKeyChecking=no'")
 
-    inv_path = cluster.output_dir / "inventory.ini"
+    inv_path = (cluster.output_dir / "inventory.ini").resolve()
     inv_path.parent.mkdir(parents=True, exist_ok=True)
     inv_path.write_text("\n".join(lines) + "\n")
     return inv_path

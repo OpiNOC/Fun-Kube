@@ -3,6 +3,8 @@
 - name: Deploy MetalLB
   hosts: control_plane[0]
   become: true
-  roles:
-    - metallb
-  when: metallb_enabled | default(false) | bool
+  tasks:
+    - name: Apply metallb role
+      ansible.builtin.include_role:
+        name: metallb
+      when: metallb_enabled | default(false) | bool

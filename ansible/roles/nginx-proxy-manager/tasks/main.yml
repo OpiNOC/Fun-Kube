@@ -11,7 +11,6 @@
 
 - name: Deploy Nginx Proxy Manager
   ansible.builtin.shell: |
-    set -o pipefail
     cat <<EOF | kubectl apply -n {{ npm_namespace }} -f -
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -72,6 +71,8 @@
           port: {{ npm_admin_port }}
           targetPort: {{ npm_admin_port }}
     EOF
+  args:
+    executable: /bin/bash
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   delegate_to: "{{ first_cp_hostname }}"

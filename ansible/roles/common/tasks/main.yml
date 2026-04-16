@@ -5,11 +5,18 @@
     name: "{{ inventory_hostname }}"
   become: true
 
+- name: Check if swap is active
+  ansible.builtin.command: swapon --show
+  register: _swap_active
+  changed_when: false
+  failed_when: false
+  become: true
+
 - name: Disable swap
   ansible.builtin.command: swapoff -a
   become: true
   changed_when: true
-  ignore_errors: true
+  when: _swap_active.stdout | length > 0
 
 - name: Remove swap from /etc/fstab
   ansible.builtin.replace:
@@ -52,7 +59,7 @@
 - name: Apply sysctl settings
   ansible.builtin.command: sysctl --system
   become: true
-  changed_when: true
+  changed_when: false
 
 - name: Install base packages
   ansible.builtin.apt:

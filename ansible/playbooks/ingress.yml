@@ -7,10 +7,9 @@
     - name: Include Traefik role
       ansible.builtin.include_role:
         name: traefik
-      when: ingress_type == "traefik"
+      when: (ingress_enabled | default(false) | bool) and ingress_type == "traefik"
 
     - name: Include Nginx Proxy Manager role
       ansible.builtin.include_role:
         name: nginx-proxy-manager
-      when: ingress_type == "nginx-proxy-manager"
-  when: ingress_enabled | default(false) | bool
+      when: (ingress_enabled | default(false) | bool) and ingress_type == "nginx-proxy-manager"

@@ -3,6 +3,8 @@
 - name: Configure keepalived
   hosts: control_plane
   become: true
-  roles:
-    - keepalived
-  when: keepalived_enabled | default(false) | bool
+  tasks:
+    - name: Apply keepalived role
+      ansible.builtin.include_role:
+        name: keepalived
+      when: keepalived_enabled | default(false) | bool

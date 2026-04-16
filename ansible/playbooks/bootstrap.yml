@@ -17,4 +17,4 @@
         path: /var/lib/longhorn
         state: directory
         mode: '0777'
-  when: longhorn_enabled | bool
+      when: longhorn_enabled | default(false) | bool

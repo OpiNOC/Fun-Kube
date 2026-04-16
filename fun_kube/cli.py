@@ -41,11 +41,15 @@ def up(
     ))
 
     # --- 0. Dipendenze bootstrap machine ---
-    console.print("\n[bold]0/4  Verifica dipendenze bootstrap machine...[/]")
+    console.print("\n[bold]0/4  Verifica e installazione dipendenze bootstrap machine...[/]")
     try:
+        deps.auto_install()
         deps.run(verbose=debug)
     except DepsError as e:
         err.print(f"\n[red]Dipendenze mancanti:[/]\n{e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        err.print(f"\n[red]Errore durante l'installazione delle dipendenze:[/]\n{e}")
         raise typer.Exit(1)
 
     # --- 1. Configurazione ---

@@ -29,23 +29,33 @@
     update_cache: true
   become: true
 
-- name: Generate default containerd config
+- name: Ensure /etc/containerd directory exists
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: '0755'
+  become: true
+
+# Genera il config atteso (default + SystemdCgroup=true) e lo applica solo se diverso
+- name: Generate and apply containerd config (idempotent)
   ansible.builtin.shell: |
-    set -o pipefail
-    containerd config default > /etc/containerd/config.toml
+    containerd config default > /tmp/_containerd_new.toml
+    sed -i 's/^\(\s*\)SystemdCgroup = false/\1SystemdCgroup = true/' /tmp/_containerd_new.toml
+    if diff -q /tmp/_containerd_new.toml /etc/containerd/config.toml > /dev/null 2>&1; then
+      echo "ok"
+    else
+      cp /tmp/_containerd_new.toml /etc/containerd/config.toml
+      echo "updated"
+    fi
   args:
-    creates: /etc/containerd/config.toml
+    executable: /bin/bash
+  register: _containerd_config_result
+  changed_when: "_containerd_config_result.stdout | trim == 'updated'"
   become: true
   notify: Restart containerd
 
-- name: Ensure SystemdCgroup is set to true
-  ansible.builtin.lineinfile:
-    path: /etc/containerd/config.toml
-    regexp: '^\s*SystemdCgroup\s*=\s*false'
-    line: '            SystemdCgroup = true'
-    backrefs: true
-  become: true
-  notify: Restart containerd
+- name: Flush handlers (restart containerd now if config changed)
+  ansible.builtin.meta: flush_handlers
 
 - name: Ensure containerd service is enabled and started
   ansible.builtin.systemd:

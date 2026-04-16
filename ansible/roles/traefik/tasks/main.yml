@@ -10,8 +10,9 @@
 
 - name: Install Helm
   ansible.builtin.shell: |
-    set -o pipefail
     curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    executable: /bin/bash
   when: helm_check.rc != 0
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true

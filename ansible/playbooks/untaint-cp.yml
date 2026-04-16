@@ -11,5 +11,6 @@
         kubectl taint nodes --all node-role.kubernetes.io/control-plane:NoSchedule-
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
-      changed_when: true
-      ignore_errors: true
+      register: _untaint_result
+      changed_when: _untaint_result.rc == 0
+      failed_when: _untaint_result.rc != 0 and 'not found' not in _untaint_result.stderr

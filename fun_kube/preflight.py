@@ -37,6 +37,12 @@ def run(cluster: ClusterConfig, debug: bool = False) -> None:
     if cluster.local_node:
         console.print("  [dim]Modalità local-node: preflight eseguito in locale[/]")
 
+    # Se il cluster è già inizializzato, salta il preflight
+    # (i port check fallirebbero perché i servizi sono già in ascolto)
+    if _cluster_already_initialized(cluster):
+        console.print("  [dim]Cluster già inizializzato — preflight saltato[/]")
+        return
+
     results: List[CheckResult] = []
     for node in cluster.nodes:
         results.extend(_check_node(node, cluster, debug))
@@ -47,6 +53,19 @@ def run(cluster: ClusterConfig, debug: bool = False) -> None:
     if failures:
         lines = [f"  [{r.node}] {r.check}: {r.detail}" for r in failures]
         raise PreflightError("\n".join(lines))
+
+
+def _cluster_already_initialized(cluster: ClusterConfig) -> bool:
+    """Ritorna True se il cluster è già stato inizializzato (kubeadm-init già eseguito)."""
+    import os
+    if cluster.local_node:
+        return os.path.exists("/etc/kubernetes/admin.conf")
+    # Per cluster remoti: prova a raggiungere l'API server
+    rc, out, _ = _local(
+        f"curl -sk --max-time 3 https://{cluster.api_endpoint}:6443/healthz",
+        debug=False,
+    )
+    return rc == 0 and "ok" in out
 
 
 # ---------------------------------------------------------------------------
