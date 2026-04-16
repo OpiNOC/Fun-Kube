@@ -132,6 +132,15 @@ Bug trovati e fixati:
 - swap/sysctl sempre reported changed → check idempotente
 - untaint fallisce se taint già rimosso → `failed_when` con 'not found'
 
+### Test 1b — Mononodo LOCAL_NODE (macchina pulita, secondo run) — IN CORSO
+**Bug trovato:** `Persistent=true` nel timer `k8s-cert-renew.timer` causa scatto immediato al primo
+enable su macchina nuova (nessun record di ultima esecuzione). Lo script abbatte l'API server per
+~50s (sposta manifest, sleep 20, ripristina, sleep 30) → `local-path-provisioner` fallisce con
+`connection refused` su `6443`.
+**Fix applicato:**
+- Rimosso `Persistent=true` dal timer (causa radice)
+- Aggiunto wait-for-API-server + retry in `local-path-provisioner/tasks/main.yml` (difesa in profondità)
+
 ### Test 2 — Mononodo con bootstrap esterna
 **Configurazione:** LOCAL_NODE=false, 1 CP, 0 worker, SSH da bootstrap separata
 **Macchine:** Fun-Kube-Bootstrap (172.30.232.70) + 1 nodo (es. .71)

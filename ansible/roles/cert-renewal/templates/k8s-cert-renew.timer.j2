@@ -6,7 +6,8 @@ Requires=k8s-cert-renew.service
 OnCalendar=monthly
 # I nodi HA rinnovano in finestre diverse (spread fino a 1h) per evitare restart simultanei
 RandomizedDelaySec={{ '3600' if topology == 'ha' else '0' }}
-Persistent=true
+# Persistent=false: evita che il timer scatti immediatamente al primo avvio (nessun record
+# di ultima esecuzione su macchina nuova) abbattendo l'API server durante il provisioning.
 
 [Install]
 WantedBy=timers.target

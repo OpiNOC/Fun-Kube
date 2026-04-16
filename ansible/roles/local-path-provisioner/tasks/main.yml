@@ -8,11 +8,25 @@
     mode: '0644'
     force: false
 
+- name: Wait for API server to be reachable
+  ansible.builtin.command: kubectl version --output=json
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: _api_check
+  until: _api_check.rc == 0
+  retries: 12
+  delay: 15
+
 - name: Apply local-path-provisioner
   ansible.builtin.command: kubectl apply -f /tmp/local-path-storage.yaml
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   changed_when: true
+  register: _lpp_apply
+  until: _lpp_apply.rc == 0
+  retries: 5
+  delay: 15
 
 - name: Wait for local-path-provisioner to be ready
   ansible.builtin.command: >
