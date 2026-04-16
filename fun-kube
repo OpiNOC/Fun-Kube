@@ -14,50 +14,46 @@ _VENV_PYTHON = _HERE / ".venv" / "bin" / "python3"
 
 def _apt_install(pkg: str) -> None:
     print(f"fun-kube: installo pacchetto sistema '{pkg}'...", flush=True)
-    subprocess.run(
-        ["sudo", "apt-get", "install", "-y", "-q", pkg],
-        check=True,
-    )
+    subprocess.run(["sudo", "apt-get", "install", "-y", "-q", pkg], check=True)
 
 
 def _ensure_deps() -> None:
-    """Crea il venv e installa le dipendenze se necessario, poi ri-esegue con il venv."""
-    # Se siamo già dentro il venv giusto, nulla da fare
-    if Path(sys.executable).resolve() == _VENV_PYTHON.resolve():
+    """Garantisce che typer/rich/python-dotenv siano importabili, poi ri-esegue se necessario."""
+    # Se le dipendenze sono già disponibili nell'interprete corrente, nulla da fare
+    # (succede quando siamo già dentro il venv)
+    try:
+        import typer  # noqa: F401
+        import rich   # noqa: F401
         return
+    except ImportError:
+        pass
 
-    # Crea il venv se non esiste ancora
-    if not _VENV_PYTHON.exists():
-        print("fun-kube: primo avvio — preparo ambiente Python...", flush=True)
+    venv_dir = _HERE / ".venv"
 
-        # Su Ubuntu 24 python3-venv non è sempre preinstallato
-        import importlib.util
-        if importlib.util.find_spec("ensurepip") is None:
-            _apt_install("python3-venv")
+    # Se il venv esiste già (con il suo Python), ri-esegui direttamente senza reinstallare
+    if _VENV_PYTHON.exists():
+        os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
 
-        # Rimuovi venv parziale se presente
-        venv_dir = _HERE / ".venv"
-        if venv_dir.exists():
-            import shutil
-            shutil.rmtree(venv_dir)
+    # Venv non esiste: crealo da zero
+    # Su Ubuntu 24 python3-venv non è preinstallato
+    import importlib.util
+    if importlib.util.find_spec("ensurepip") is None:
+        _apt_install("python3-venv")
 
-        subprocess.run(
-            [sys.executable, "-m", "venv", str(_HERE / ".venv")],
-            check=True,
-        )
-        subprocess.run(
-            [
-                str(_HERE / ".venv" / "bin" / "pip"),
-                "install", "--quiet",
-                "typer[all]>=0.12",
-                "python-dotenv>=1.0",
-                "rich>=13.0",
-            ],
-            check=True,
-        )
-        print("fun-kube: dipendenze installate.\n", flush=True)
+    print("fun-kube: primo avvio — preparo ambiente Python...", flush=True)
+    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
+    subprocess.run(
+        [
+            str(venv_dir / "bin" / "pip"), "install", "--quiet",
+            "typer>=0.12",
+            "python-dotenv>=1.0",
+            "rich>=13.0",
+        ],
+        check=True,
+    )
+    print("fun-kube: dipendenze installate.\n", flush=True)
 
-    # Ri-esegui questo stesso script con il Python del venv
+    # Ri-esegui con il Python del venv
     os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
 
 
