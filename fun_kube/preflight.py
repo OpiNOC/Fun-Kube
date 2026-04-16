@@ -69,14 +69,25 @@ def _check_node_local(node: NodeConfig, debug: bool) -> List[CheckResult]:
         detail = (out + " " + err).strip()[:120] if not ok else ""
         return CheckResult(node=node.hostname, check=name, ok=ok, detail=detail)
 
+    results.append(check(
+        "OS: Ubuntu 24.04+",
+        "awk -F= '/^VERSION_ID/{gsub(/\"/,\"\",$2); if($2+0 >= 24) exit 0; else exit 1}' /etc/os-release",
+    ))
+    results.append(check("CPU >= 2 cores", "[ $(nproc) -ge 2 ]"))
+    results.append(check(
+        "RAM >= 3GB",
+        "awk '/MemTotal/{exit ($2 >= 3000000) ? 0 : 1}' /proc/meminfo",
+    ))
     results.append(check("swap disabled", "swapon --show",
                          ok_fn=lambda rc, out: out.strip() == ""))
-    results.append(check("disk >= 10GB free",
-                         "df / | awk 'NR==2 {exit ($4 < 10485760)}'"))
+    results.append(check("disk >= 20GB free",
+                         "df / | awk 'NR==2 {exit ($4 < 20971520)}'"))
     results.append(check("port 6443 free",
                          "! ss -tlnp 2>/dev/null | grep -q ':6443 '"))
     results.append(check("port 2379-2380 free",
                          "! ss -tlnp 2>/dev/null | grep -qE ':(2379|2380) '"))
+    results.append(check("port 10250 free",
+                         "! ss -tlnp 2>/dev/null | grep -q ':10250 '"))
     return results
 
 
@@ -96,18 +107,43 @@ def _check_node_ssh(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> Li
         return results
 
     results.append(check("sudo no-password", "sudo -n true"))
+
+    # OS: Ubuntu 24.04+
+    results.append(check(
+        "OS: Ubuntu 24.04+",
+        "awk -F= '/^VERSION_ID/{gsub(/\"/,\"\",$2); if($2+0 >= 24) exit 0; else exit 1}' /etc/os-release",
+        ok_fn=lambda rc, out: rc == 0,
+    ))
+
+    # CPU >= 2
+    results.append(check(
+        "CPU >= 2 cores",
+        "[ $(nproc) -ge 2 ]",
+    ))
+
+    # RAM: CP >= 3GB, worker >= 2GB
+    ram_threshold = 3000000 if node.role == "control-plane" else 2000000
+    ram_label = "RAM >= 3GB" if node.role == "control-plane" else "RAM >= 2GB"
+    results.append(check(
+        ram_label,
+        f"awk '/MemTotal/{{exit ($2 >= {ram_threshold}) ? 0 : 1}}' /proc/meminfo",
+    ))
+
     results.append(check("swap disabled", "swapon --show",
                          ok_fn=lambda rc, out: out.strip() == ""))
     results.append(check("kernel: br_netfilter", "lsmod | grep -q br_netfilter"))
     results.append(check("kernel: overlay", "lsmod | grep -q overlay"))
-    results.append(check("disk >= 10GB free",
-                         "df / | awk 'NR==2 {exit ($4 < 10485760)}'"))
+    results.append(check("disk >= 20GB free",
+                         "df / | awk 'NR==2 {exit ($4 < 20971520)}'"))
 
     if node.role == "control-plane":
         results.append(check("port 6443 free",
                              "! ss -tlnp 2>/dev/null | grep -q ':6443 '"))
         results.append(check("port 2379-2380 free",
                              "! ss -tlnp 2>/dev/null | grep -qE ':(2379|2380) '"))
+
+    results.append(check("port 10250 free",
+                         "! ss -tlnp 2>/dev/null | grep -q ':10250 '"))
 
     other_ips = [n.ip for n in cluster.nodes if n.ip != node.ip]
     if other_ips:

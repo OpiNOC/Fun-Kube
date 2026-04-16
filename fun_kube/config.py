@@ -72,6 +72,7 @@ class ClusterConfig:
     cert_manager_version: str
     api_server_extra_sans: List[str]
     local_node: bool
+    cluster_timezone: str
 
     @property
     def control_planes(self) -> List[NodeConfig]:
@@ -153,6 +154,7 @@ def load(env_file: Path) -> ClusterConfig:
         cert_manager_version=env.get("CERT_MANAGER_VERSION", "v1.17.2"),
         api_server_extra_sans=extra_sans,
         local_node=local_node,
+        cluster_timezone=env.get("CLUSTER_TIMEZONE", "Europe/Rome"),
     )
 
     _validate(cfg)

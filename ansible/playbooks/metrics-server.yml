@@ -1,0 +1,7 @@
+# Install metrics-server (core cluster component)
+---
+- name: Install metrics-server
+  hosts: control_plane[0]
+  become: true
+  roles:
+    - metrics-server

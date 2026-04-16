@@ -1,0 +1,49 @@
+# tasks file for metrics-server
+---
+- name: Resolve latest metrics-server version
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/kubernetes-sigs/metrics-server/releases/latest
+    return_content: true
+  register: ms_release
+  when: metrics_server_version == "latest"
+
+- name: Set resolved metrics-server version
+  ansible.builtin.set_fact:
+    ms_version_resolved: >-
+      {{ (ms_release.json.tag_name)
+         if metrics_server_version == "latest"
+         else metrics_server_version }}
+
+- name: Download metrics-server manifest
+  ansible.builtin.get_url:
+    url: "https://github.com/kubernetes-sigs/metrics-server/releases/download/{{ ms_version_resolved }}/components.yaml"
+    dest: /tmp/metrics-server.yaml
+    mode: '0644'
+    force: true
+
+- name: Apply metrics-server manifest
+  ansible.builtin.command: kubectl apply -f /tmp/metrics-server.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+
+# Su kubeadm i kubelet usano certificati self-signed:
+# --kubelet-insecure-tls è obbligatorio altrimenti kubectl top non funziona mai.
+# Usiamo kubectl patch invece di modificare il manifest per essere robusti
+# a cambiamenti upstream nella struttura del file YAML.
+- name: Patch deployment — add --kubelet-insecure-tls
+  ansible.builtin.command: >
+    kubectl patch deployment metrics-server -n kube-system
+    --type=json
+    -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+
+- name: Wait for metrics-server to be ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=Available deployment/metrics-server
+    -n kube-system --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false

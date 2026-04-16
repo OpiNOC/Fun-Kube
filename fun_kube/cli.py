@@ -133,5 +133,120 @@ def check_deps(
         raise typer.Exit(1)
 
 
+@app.command()
+def reset(
+    env_file: Path = typer.Argument(Path(".env")),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Salta la conferma interattiva"),
+    debug: bool = typer.Option(False, "--debug"),
+) -> None:
+    """Distrugge il cluster: kubeadm reset su tutti i nodi + pulizia."""
+
+    console.print(Panel(
+        "[bold red]Fun-Kube RESET[/] — Questa operazione è distruttiva e irreversibile",
+        expand=False,
+    ))
+
+    try:
+        cluster = cfg_module.load(env_file)
+    except ConfigError as e:
+        err.print(f"\n[red]Errore di configurazione:[/]\n{e}")
+        raise typer.Exit(1)
+
+    if not yes:
+        console.print(f"\n  Cluster : [cyan]{cluster.cluster_name}[/]")
+        console.print(f"  Nodi    : {', '.join(n.hostname for n in cluster.nodes)}")
+        console.print("\n  [yellow]Verranno eseguiti kubeadm reset + pulizia su tutti i nodi.[/]")
+        confirm = typer.prompt("\nDigita il nome del cluster per confermare", default="")
+        if confirm != cluster.cluster_name:
+            console.print("[yellow]Reset annullato.[/]")
+            raise typer.Exit(0)
+
+    reset_script = (
+        "sudo kubeadm reset -f 2>/dev/null || true; "
+        "sudo rm -rf /etc/kubernetes /var/lib/etcd /var/lib/kubelet "
+        "         /etc/cni/net.d /opt/cni/bin /root/.kube; "
+        "sudo iptables -F && sudo iptables -t nat -F && "
+        "sudo iptables -t mangle -F && sudo iptables -X 2>/dev/null || true; "
+        "sudo ip link delete cni0 2>/dev/null || true; "
+        "sudo ip link delete flannel.1 2>/dev/null || true; "
+        "sudo ip link delete calico.1 2>/dev/null || true"
+    )
+
+    import subprocess as sp
+    for node in cluster.nodes:
+        console.print(f"  [cyan]▶[/]  reset {node.hostname} ({node.ip})...")
+        if cluster.local_node:
+            result = sp.run(["bash", "-c", reset_script], text=True)
+        else:
+            result = sp.run([
+                "ssh", "-i", str(cluster.ssh_key_path),
+                "-o", "StrictHostKeyChecking=no",
+                f"{cluster.ssh_user}@{node.ip}",
+                reset_script,
+            ], text=True)
+        if result.returncode == 0:
+            console.print(f"  [green]✓[/]  {node.hostname} pulito")
+        else:
+            console.print(f"  [yellow]⚠[/]  {node.hostname}: exit {result.returncode} (non bloccante)")
+
+    console.print("\n[bold green]Reset completato.[/] I nodi sono pronti per un nuovo provisioning.")
+
+
+@app.command()
+def diagnose(
+    env_file: Path = typer.Argument(Path(".env")),
+    debug: bool = typer.Option(False, "--debug"),
+) -> None:
+    """Raccoglie info diagnostiche da tutti i nodi del cluster."""
+    from rich.table import Table
+    import subprocess as sp
+
+    console.print(Panel(
+        "[bold cyan]Fun-Kube Diagnose[/] — Stato nodi",
+        expand=False,
+    ))
+
+    try:
+        cluster = cfg_module.load(env_file)
+    except ConfigError as e:
+        err.print(f"\n[red]Errore di configurazione:[/]\n{e}")
+        raise typer.Exit(1)
+
+    checks = [
+        ("kubelet",     "systemctl is-active kubelet 2>/dev/null || echo inactive"),
+        ("containerd",  "systemctl is-active containerd 2>/dev/null || echo inactive"),
+        ("k8s node",    "kubectl get node $(hostname) --no-headers 2>/dev/null | awk '{print $2}' || echo n/a"),
+        ("disk free",   "df -h / | awk 'NR==2{print $4\" free\"}'"),
+        ("RAM free",    "free -h | awk '/^Mem/{print $7\" free\"}'"),
+        ("load avg",    "cut -d' ' -f1-3 /proc/loadavg"),
+        ("k8s version", "kubelet --version 2>/dev/null || echo n/a"),
+    ]
+
+    table = Table(show_header=True, header_style="bold", box=None)
+    table.add_column("Node", style="cyan")
+    table.add_column("Role")
+    for label, _ in checks:
+        table.add_column(label, justify="center")
+
+    for node in cluster.nodes:
+        row = [node.hostname, node.role]
+        for _, cmd in checks:
+            if cluster.local_node:
+                result = sp.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=10)
+            else:
+                result = sp.run([
+                    "ssh", "-i", str(cluster.ssh_key_path),
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "ConnectTimeout=5",
+                    f"{cluster.ssh_user}@{node.ip}", cmd,
+                ], capture_output=True, text=True, timeout=15)
+            val = result.stdout.strip() or result.stderr.strip()[:30] or "?"
+            color = "green" if val in ("active", "Ready") else "red" if val in ("inactive", "NotReady") else ""
+            row.append(f"[{color}]{val}[/]" if color else val)
+        table.add_row(*row)
+
+    console.print(table)
+
+
 def main() -> None:
     app()

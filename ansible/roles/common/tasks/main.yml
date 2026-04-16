@@ -64,8 +64,23 @@
       - lsb-release
       - nfs-common
       - open-iscsi
+      - conntrack
+      - socat
+      - chrony
     state: present
     update_cache: true
+  become: true
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ cluster_timezone }}"
+  become: true
+
+- name: Enable and start chrony
+  ansible.builtin.systemd:
+    name: chrony
+    enabled: true
+    state: started
   become: true
 
 - name: Enable and start iscsid (required by Longhorn)

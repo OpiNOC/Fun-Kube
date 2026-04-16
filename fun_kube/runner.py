@@ -37,7 +37,14 @@ def run_core(cluster: ClusterConfig, debug: bool = False) -> None:
     inventory_path = _write_inventory(cluster)
     extra_vars = _build_extra_vars(cluster, k8s_version_resolved)
 
-    for pb in _build_playbook_sequence(cluster):
+    playbooks = _build_playbook_sequence(cluster)
+
+    # Syntax check su tutti i playbook prima di eseguire qualsiasi cosa
+    console.print("  [cyan]▶[/]  syntax check playbooks...")
+    _syntax_check_playbooks(playbooks, inventory_path, extra_vars)
+    console.print("  [green]✓[/]  syntax check OK")
+
+    for pb in playbooks:
         pb_path = _PLAYBOOK_DIR / pb
         if not pb_path.exists():
             raise RunnerError(f"Playbook non trovato: {pb_path}")
@@ -277,6 +284,7 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
     if cluster.untaint_cp:
         playbooks.append("untaint-cp.yml")
 
+    playbooks.append("metrics-server.yml")
     playbooks.append("cert-manager.yml")
     playbooks.append("cert-renewal.yml")
 
@@ -370,12 +378,36 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict
         "keepalived_enabled": cluster.keepalived.enabled,
         "keepalived_vip": cluster.keepalived.vip,
         "keepalived_interface": cluster.keepalived.interface,
+        # Timezone
+        "cluster_timezone": cluster.cluster_timezone,
     }
 
 
 # ---------------------------------------------------------------------------
 # Ansible runner
 # ---------------------------------------------------------------------------
+
+def _syntax_check_playbooks(playbooks: List[str], inventory: Path, extra_vars: dict) -> None:
+    """Verifica la sintassi di tutti i playbook prima di eseguirli."""
+    errors = []
+    for pb in playbooks:
+        pb_path = _PLAYBOOK_DIR / pb
+        if not pb_path.exists():
+            errors.append(f"Playbook non trovato: {pb_path}")
+            continue
+        cmd = [
+            "ansible-playbook",
+            "--syntax-check",
+            str(pb_path),
+            "-i", str(inventory),
+            "--extra-vars", json.dumps(extra_vars),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(_ANSIBLE_DIR))
+        if result.returncode != 0:
+            errors.append(f"{pb}:\n{result.stdout}\n{result.stderr}")
+    if errors:
+        raise RunnerError("Syntax check fallito:\n" + "\n".join(errors))
+
 
 def _run_playbook(pb: Path, inventory: Path, extra_vars: dict, debug: bool) -> None:
     cmd = [

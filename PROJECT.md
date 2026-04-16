@@ -33,8 +33,8 @@ Stato del progetto
   fun_kube/deps.py               ✓ completo (verifica tool bootstrap machine)
   bootstrap-setup.sh             ✓ completo (setup bootstrap machine)
   ansible/ansible.cfg            ✓ completo
-  ansible/playbooks/ (10)        ✓ scaffolding completo (generato, non testato)
-  ansible/roles/ (9)             ✓ scaffolding completo (generato, non testato)
+  ansible/playbooks/ (11)        ✓ scaffolding completo (generato, non testato)
+  ansible/roles/ (10)            ✓ scaffolding completo (generato, non testato)
   README.md                      ✗ da fare
   Test reale su nodi             ✗ da fare
 
