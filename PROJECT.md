@@ -141,10 +141,14 @@ enable su macchina nuova (nessun record di ultima esecuzione). Lo script abbatte
 - Rimosso `Persistent=true` dal timer (causa radice)
 - Aggiunto wait-for-API-server + retry in `local-path-provisioner/tasks/main.yml` (difesa in profondità)
 
-### Test 2 — Mononodo con bootstrap esterna
+### Test 2 — Mononodo con bootstrap esterna ✓ COMPLETATO (2026-04-16)
 **Configurazione:** LOCAL_NODE=false, 1 CP, 0 worker, SSH da bootstrap separata
-**Macchine:** Fun-Kube-Bootstrap (172.30.232.70) + 1 nodo (es. .71)
-**Stato:** da eseguire
+**Macchine:** Fun-Kube-Bootstrap (172.30.232.70) + 1 nodo separato
+**Risultato:** PASS — cluster ready
+
+Bug trovati e fixati:
+- Preflight `kernel: br_netfilter` e `kernel: overlay` falliscono su macchina pulita → check
+  cambiato da `lsmod` a `lsmod || modinfo` (modulo disponibile basta, `common` lo carica)
 
 ### Test 3 — Single CP con worker
 **Configurazione:** 1 CP + N worker, SSH da bootstrap esterna

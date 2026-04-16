@@ -150,8 +150,10 @@ def _check_node_ssh(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> Li
 
     results.append(check("swap disabled", "swapon --show",
                          ok_fn=lambda rc, out: out.strip() == ""))
-    results.append(check("kernel: br_netfilter", "lsmod | grep -q br_netfilter"))
-    results.append(check("kernel: overlay", "lsmod | grep -q overlay"))
+    results.append(check("kernel: br_netfilter",
+                         "lsmod | grep -q br_netfilter || modinfo br_netfilter >/dev/null 2>&1"))
+    results.append(check("kernel: overlay",
+                         "lsmod | grep -q overlay || modinfo overlay >/dev/null 2>&1"))
     results.append(check("disk >= 20GB free",
                          "df / | awk 'NR==2 {exit ($4 < 20971520)}'"))
 
