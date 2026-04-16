@@ -52,8 +52,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun-kube (entry point)        | ✓ auto-bootstrap venv Python   |
 | fun_kube/config.py            | ✓ parsing, validazione, topologia |
 | fun_kube/preflight.py         | ✓ local + SSH checks           |
-| fun_kube/runner.py            | ✓ inventory, sequenza playbook |
-| fun_kube/cli.py               | ✓ up, check-deps, reset, diagnose |
+| fun_kube/runner.py            | ✓ inventory, sequenza playbook, Ctrl+C |
+| fun_kube/cli.py               | ✓ up, check-deps, reset, diagnose, Ctrl+C |
 | fun_kube/deps.py              | ✓ check + auto-install tools   |
 | ansible/roles/common          | ✓ testato                      |
 | ansible/roles/containerd      | ✓ testato (fix config v2.x)    |
@@ -68,7 +68,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/traefik         | scaffolding — non testato      |
 | ansible/roles/nginx-proxy-manager | scaffolding — non testato  |
 | ansible/roles/longhorn        | scaffolding — non testato      |
-| .env.example                  | ✓ completo                     |
+| .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
 
 ---
@@ -158,7 +158,15 @@ Bug trovati e fixati:
 ### Test 4 — HA multi CP
 **Configurazione:** 3 CP + worker, keepalived VIP
 **Macchine:** bootstrap + 3 CP (es. .71-.73) + worker (es. .74-.76)
-**Stato:** da eseguire
+**Stato:** IN CORSO
+
+Bug trovati e fixati (pre-test):
+- `bootstrap-kubeconfig.yml` fallisce con "connection refused" su VIP keepalived →
+  aggiunto wait-for-API (`kubectl cluster-info`, retries: 30, delay: 10s) +
+  `--validate=false` su tutti i `kubectl apply` per evitare download schema OpenAPI
+- Ctrl+C non interrompeva il provisioning → `runner.py` usa `Popen` + trap
+  `KeyboardInterrupt` per terminare `ansible-playbook`; `cli.py` intercetta in tutti
+  i punti critici e stampa messaggio pulito (exit 130)
 
 ---
 

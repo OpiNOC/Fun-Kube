@@ -420,10 +420,19 @@ def _run_playbook(pb: Path, inventory: Path, extra_vars: dict, debug: bool) -> N
         cmd.append("-vv")
 
     # Esegue dalla directory ansible/ così ansible.cfg viene rilevato automaticamente
-    result = subprocess.run(cmd, text=True, cwd=str(_ANSIBLE_DIR))
-    if result.returncode != 0:
+    proc = subprocess.Popen(cmd, text=True, cwd=str(_ANSIBLE_DIR))
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        raise
+    if proc.returncode != 0:
         raise RunnerError(
-            f"Il playbook {pb.name} è terminato con codice {result.returncode}"
+            f"Il playbook {pb.name} è terminato con codice {proc.returncode}"
         )
 
 

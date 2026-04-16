@@ -45,6 +45,9 @@ def up(
     try:
         deps.auto_install()
         deps.run(verbose=debug)
+    except KeyboardInterrupt:
+        err.print("\n[yellow]Installazione interrotta dall'utente (Ctrl+C).[/]")
+        raise typer.Exit(130)
     except DepsError as e:
         err.print(f"\n[red]Dipendenze mancanti:[/]\n{e}")
         raise typer.Exit(1)
@@ -93,6 +96,9 @@ def up(
         console.print("\n[bold]2/4  Preflight checks...[/]")
         try:
             preflight.run(cluster, debug=debug)
+        except KeyboardInterrupt:
+            err.print("\n[yellow]Installazione interrotta dall'utente (Ctrl+C).[/]")
+            raise typer.Exit(130)
         except preflight.PreflightError as e:
             err.print(f"\n[red]Preflight fallito:[/]\n{e}")
             raise typer.Exit(1)
@@ -103,6 +109,9 @@ def up(
     console.print("\n[bold]3/4  Provisioning cluster core...[/]")
     try:
         runner.run_core(cluster, debug=debug)
+    except KeyboardInterrupt:
+        err.print("\n[yellow]Installazione interrotta dall'utente (Ctrl+C).[/]")
+        raise typer.Exit(130)
     except runner.RunnerError as e:
         err.print(f"\n[red]Provisioning fallito:[/]\n{e}")
         raise typer.Exit(1)
