@@ -1,14 +1,51 @@
 #!/usr/bin/env python3
 """
-fun-kube entry point — usabile direttamente senza pip install.
-Aggiungere al PATH oppure eseguire con ./fun-kube
+fun-kube entry point — funziona su Ubuntu 24 pulito senza pip install manuale.
+Al primo avvio crea un venv locale e installa le dipendenze automaticamente.
 """
 import sys
 import os
+import subprocess
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = Path(__file__).resolve().parent
+_VENV_PYTHON = _HERE / ".venv" / "bin" / "python3"
 
-from fun_kube.cli import main
+
+def _ensure_deps() -> None:
+    """Crea il venv e installa le dipendenze se necessario, poi ri-esegue con il venv."""
+    # Se siamo già dentro il venv giusto, nulla da fare
+    if Path(sys.executable).resolve() == _VENV_PYTHON.resolve():
+        return
+
+    # Crea il venv se non esiste ancora
+    if not _VENV_PYTHON.exists():
+        print("fun-kube: primo avvio — preparo ambiente Python...", flush=True)
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(_HERE / ".venv")],
+            check=True,
+        )
+        subprocess.run(
+            [
+                str(_HERE / ".venv" / "bin" / "pip"),
+                "install", "--quiet",
+                "typer[all]>=0.12",
+                "python-dotenv>=1.0",
+                "rich>=13.0",
+            ],
+            check=True,
+        )
+        print("fun-kube: dipendenze installate.\n", flush=True)
+
+    # Ri-esegui questo stesso script con il Python del venv
+    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
+
+
+_ensure_deps()
+
+sys.path.insert(0, str(_HERE))
+
+from fun_kube.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     main()
