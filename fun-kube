@@ -12,6 +12,14 @@ _HERE = Path(__file__).resolve().parent
 _VENV_PYTHON = _HERE / ".venv" / "bin" / "python3"
 
 
+def _apt_install(pkg: str) -> None:
+    print(f"fun-kube: installo pacchetto sistema '{pkg}'...", flush=True)
+    subprocess.run(
+        ["sudo", "apt-get", "install", "-y", "-q", pkg],
+        check=True,
+    )
+
+
 def _ensure_deps() -> None:
     """Crea il venv e installa le dipendenze se necessario, poi ri-esegue con il venv."""
     # Se siamo già dentro il venv giusto, nulla da fare
@@ -21,6 +29,18 @@ def _ensure_deps() -> None:
     # Crea il venv se non esiste ancora
     if not _VENV_PYTHON.exists():
         print("fun-kube: primo avvio — preparo ambiente Python...", flush=True)
+
+        # Su Ubuntu 24 python3-venv non è sempre preinstallato
+        import importlib.util
+        if importlib.util.find_spec("ensurepip") is None:
+            _apt_install("python3-venv")
+
+        # Rimuovi venv parziale se presente
+        venv_dir = _HERE / ".venv"
+        if venv_dir.exists():
+            import shutil
+            shutil.rmtree(venv_dir)
+
         subprocess.run(
             [sys.executable, "-m", "venv", str(_HERE / ".venv")],
             check=True,
