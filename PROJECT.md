@@ -155,10 +155,10 @@ Bug trovati e fixati:
 **Macchine:** bootstrap + CP (es. .71) + worker (es. .74, .75)
 **Stato:** da eseguire
 
-### Test 4 — HA multi CP
-**Configurazione:** 3 CP + worker, keepalived VIP
-**Macchine:** bootstrap + 3 CP (es. .71-.73) + worker (es. .74-.76)
-**Stato:** IN CORSO
+### Test 4 — HA multi CP (solo CP, senza worker) ✓ COMPLETATO (2026-04-17)
+**Configurazione:** 3 CP, keepalived VIP, nessun worker
+**Macchine:** bootstrap (.70) + 3 CP (.71-.73)
+**Risultato:** PASS — cluster HA funzionante, Calico+metrics-server+cert-manager up
 
 Bug trovati e fixati (pre-test):
 - `bootstrap-kubeconfig.yml` fallisce con "connection refused" su VIP keepalived →
@@ -167,6 +167,16 @@ Bug trovati e fixati (pre-test):
 - Ctrl+C non interrompeva il provisioning → `runner.py` usa `Popen` + trap
   `KeyboardInterrupt` per terminare `ansible-playbook`; `cli.py` intercetta in tutti
   i punti critici e stampa messaggio pulito (exit 130)
+
+Nota: errore non bloccante su calico role (`kubectl wait` fallisce con "no matching
+resources found" perché il Calico operator non ha ancora creato i pod al momento
+del check). L'installazione va a buon fine, ma il task è ignorato con `ignore_errors`.
+Da fixare: vedi sezione Note Tecniche.
+
+### Test 5 — HA multi CP completo (3 CP + 3 worker)
+**Configurazione:** 3 CP + 3 worker, keepalived VIP
+**Macchine:** bootstrap (.70) + 3 CP (.71-.73) + 3 worker (.74-.76)
+**Stato:** DA ESEGUIRE (snapshot Proxmox ripristinati, macchine pulite)
 
 ---
 
@@ -343,6 +353,22 @@ Soluzione: `kubectl apply --server-side --force-conflicts`.
 **Versione Kubernetes "latest"**
 Risolta una volta sola in Python da `https://dl.k8s.io/release/stable.txt`
 e passata ad Ansible come `k8s_version_resolved`.
+
+**Calico: "no matching resources found" al wait dei pod**
+Il task `Wait for Calico pods to be running` esegue `kubectl wait --for=condition=Ready pod -l k8s-app=calico-node -n calico-system --timeout=300s` subito dopo l'apply del manifest dell'operatore Calico. In quel momento l'operatore non ha ancora riconciliato e i pod `calico-node` non esistono ancora → `kubectl wait` fallisce con `error: no matching resources found` (non "pod non ready", ma "nessun pod trovato").
+Il task usa `ignore_errors: yes` quindi l'installazione prosegue e Calico si avvia correttamente pochi secondi dopo.
+
+**Fix da applicare:** aggiungere prima del `kubectl wait` un task che attende la creazione effettiva dei pod (con retry), ad esempio:
+```yaml
+- name: Wait for Calico operator to create calico-node pods
+  shell: kubectl get pods -l k8s-app=calico-node -n calico-system --no-headers 2>/dev/null | wc -l
+  register: calico_pod_count
+  retries: 30
+  delay: 10
+  until: calico_pod_count.stdout | int > 0
+  changed_when: false
+```
+Oppure attendere che il DaemonSet `calico-node` esista: `kubectl wait daemonset/calico-node -n calico-system --for=jsonpath='{.status.desiredNumberScheduled}' --timeout=120s`.
 
 **Idempotenza**
 Ogni run può essere rieseguito senza danni:
