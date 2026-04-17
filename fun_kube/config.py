@@ -47,6 +47,8 @@ class IngressConfig:
 class LonghornConfig:
     enabled: bool
     rwx: bool
+    ui_nodeport: int  # 0 = disabilitato, altrimenti porta NodePort (es. 30080)
+    version: str
 
 
 Topology = Literal["single-node", "single-cp", "ha"]
@@ -147,6 +149,8 @@ def load(env_file: Path) -> ClusterConfig:
         longhorn=LonghornConfig(
             enabled=_bool(env, "LONGHORN_ENABLED"),
             rwx=_bool(env, "LONGHORN_RWX"),
+            ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "0") or "0"),
+            version=env.get("LONGHORN_VERSION", "").strip(),
         ),
         topology=topology,
         output_dir=Path(env.get("OUTPUT_DIR", "./output")),

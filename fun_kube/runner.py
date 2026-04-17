@@ -295,6 +295,9 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
 
     playbooks.append("bootstrap-kubeconfig.yml")
 
+    if cluster.longhorn.enabled:
+        playbooks.append("longhorn.yml")
+
     return playbooks
 
 
@@ -380,6 +383,11 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict
         "keepalived_interface": cluster.keepalived.interface,
         # Timezone
         "cluster_timezone": cluster.cluster_timezone,
+        # Longhorn
+        "longhorn_enabled": cluster.longhorn.enabled,
+        "longhorn_rwx": cluster.longhorn.rwx,
+        "longhorn_ui_nodeport": cluster.longhorn.ui_nodeport,
+        **({"longhorn_version": cluster.longhorn.version} if cluster.longhorn.version else {}),
     }
 
 

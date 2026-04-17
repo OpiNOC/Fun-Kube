@@ -1,10 +1,109 @@
-# Deploy Longhorn
+# Deploy Longhorn — storage distribuito
+#
+# Play 1: prerequisiti su tutti i nodi (nfs-common, open-iscsi)
+# Play 2: deploy manifest Longhorn dal primo CP
+# Play 3: patch UI NodePort (opzionale, se longhorn_ui_nodeport > 0)
 ---
+- name: Longhorn prerequisites on all nodes
+  hosts: control_plane,workers
+  become: true
+  tasks:
+    - name: Install Longhorn prerequisites
+      ansible.builtin.apt:
+        name:
+          - nfs-common
+          - open-iscsi
+        state: present
+        update_cache: true
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Enable and start iscsid
+      ansible.builtin.systemd:
+        name: iscsid
+        enabled: true
+        state: started
+      when: longhorn_enabled | default(false) | bool
+
+
 - name: Deploy Longhorn
   hosts: control_plane[0]
   become: true
   tasks:
-    - name: Apply longhorn role
-      ansible.builtin.include_role:
-        name: longhorn
+    - name: Download Longhorn manifest
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/longhorn/longhorn/{{ longhorn_version }}/deploy/longhorn.yaml"
+        dest: /tmp/longhorn.yaml
+        mode: '0644'
+        force: true
       when: longhorn_enabled | default(false) | bool
+
+    - name: Apply Longhorn manifest (server-side)
+      ansible.builtin.command: >
+        kubectl apply --server-side --force-conflicts -f /tmp/longhorn.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Wait for longhorn-manager DaemonSet to exist
+      ansible.builtin.command: >
+        kubectl get daemonset longhorn-manager -n {{ longhorn_namespace }} --no-headers
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: lh_ds
+      retries: 30
+      delay: 10
+      until: lh_ds.rc == 0
+      changed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Wait for longhorn-manager pods to be Ready
+      ansible.builtin.command: >
+        kubectl rollout status daemonset/longhorn-manager -n {{ longhorn_namespace }} --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Wait for longhorn-ui Deployment to be Available
+      ansible.builtin.command: >
+        kubectl rollout status deployment/longhorn-ui -n {{ longhorn_namespace }} --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Verify default StorageClass longhorn
+      ansible.builtin.command: kubectl get storageclass longhorn
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Verify longhorn-rwx StorageClass
+      ansible.builtin.command: kubectl get storageclass longhorn-rwx
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+      ignore_errors: true
+      when:
+        - longhorn_enabled | default(false) | bool
+        - longhorn_rwx | default(false) | bool
+
+
+- name: Expose Longhorn UI via NodePort
+  hosts: control_plane[0]
+  become: true
+  tasks:
+    - name: Patch longhorn-frontend Service to NodePort
+      ansible.builtin.command: >
+        kubectl patch service longhorn-frontend -n {{ longhorn_namespace }}
+        --type='json'
+        -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
+             {"op":"add","path":"/spec/ports/0/nodePort","value":{{ longhorn_ui_nodeport }}}]'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+      when:
+        - longhorn_enabled | default(false) | bool
+        - longhorn_ui_nodeport | default(0) | int > 0
