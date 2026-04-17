@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 from . import config as cfg_module
 from .config import ConfigError
@@ -32,6 +33,7 @@ def up(
     dry_run: bool = typer.Option(False, "--dry-run", help="Solo validazione, nessuna modifica"),
     debug: bool = typer.Option(False, "--debug", help="Output verboso"),
     skip_checks: bool = typer.Option(False, "--skip-checks", help="Salta preflight checks"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Salta la conferma interattiva"),
 ) -> None:
     """Provisiona un cluster Kubernetes dal file .env."""
 
@@ -63,33 +65,19 @@ def up(
         err.print(f"\n[red]Errore di configurazione:[/]\n{e}")
         raise typer.Exit(1)
 
-    topology_label = {
-        "single-node": "Single-node (mononodo)",
-        "single-cp":   "Single control-plane",
-        "ha":          "HA multi control-plane",
-    }[cluster.topology]
-
-    addons = [
-        name
-        for name, enabled in [
-            ("MetalLB", cluster.metallb.enabled),
-            (f"Ingress/{cluster.ingress.type}", cluster.ingress.enabled),
-            ("Longhorn", cluster.longhorn.enabled),
-        ]
-        if enabled
-    ]
-
-    console.print(f"  Cluster   : [cyan]{cluster.cluster_name}[/]")
-    console.print(f"  Topologia : [cyan]{topology_label}[/]")
-    console.print(f"  Nodi      : {len(cluster.control_planes)} control-plane, {len(cluster.workers)} worker")
-    if cluster.local_node:
-        console.print(f"  Modalità  : [yellow]local-node[/] (bootstrap = nodo)")
-    console.print(f"  K8s       : {cluster.k8s_version}")
-    console.print(f"  Addons    : {', '.join(addons) if addons else 'nessuno'}")
+    # --- Riepilogo e conferma ---
+    _print_cluster_summary(cluster)
 
     if dry_run:
         console.print("\n[green]--dry-run: configurazione valida. Nessuna modifica effettuata.[/]")
         raise typer.Exit(0)
+
+    if not yes:
+        console.print()
+        confirm = typer.confirm("Procedere con il provisioning?", default=False)
+        if not confirm:
+            console.print("[yellow]Provisioning annullato.[/]")
+            raise typer.Exit(0)
 
     # --- 2. Preflight ---
     if not skip_checks:
@@ -259,6 +247,74 @@ def diagnose(
         table.add_row(*row)
 
     console.print(table)
+
+
+def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
+    from .config import ClusterConfig
+
+    topology_label = {
+        "single-node": "Single-node (mononodo)",
+        "single-cp":   "Single control-plane",
+        "ha":          "HA multi control-plane",
+    }[cluster.topology]
+
+    addons = [
+        name
+        for name, enabled in [
+            ("MetalLB", cluster.metallb.enabled),
+            (f"Ingress/{cluster.ingress.type}", cluster.ingress.enabled),
+            ("Longhorn", cluster.longhorn.enabled),
+        ]
+        if enabled
+    ]
+
+    console.print()
+    console.print(Panel(
+        f"[bold]Cluster:[/] [cyan]{cluster.cluster_name}[/]  |  "
+        f"[bold]Topologia:[/] [cyan]{topology_label}[/]  |  "
+        f"[bold]K8s:[/] {cluster.k8s_version}",
+        title="Riepilogo configurazione",
+        expand=False,
+    ))
+
+    # Tabella nodi
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Hostname", style="cyan")
+    table.add_column("IP")
+    table.add_column("Ruolo")
+
+    for i, node in enumerate(cluster.nodes, 1):
+        role_color = "blue" if node.role == "control-plane" else "green"
+        table.add_row(
+            str(i),
+            node.hostname,
+            node.ip,
+            f"[{role_color}]{node.role}[/]",
+        )
+
+    console.print(table)
+    console.print()
+
+    # Dettagli rete
+    console.print(f"  Pod CIDR     : {cluster.pod_cidr}")
+    console.print(f"  Service CIDR : {cluster.service_cidr}")
+    if cluster.topology == "ha":
+        console.print(f"  VIP          : {cluster.keepalived.vip}  (iface: {cluster.keepalived.interface})")
+    if cluster.local_node:
+        console.print(f"  Modalità     : [yellow]local-node[/] (bootstrap = nodo)")
+    else:
+        console.print(f"  SSH          : {cluster.ssh_user}@... (key: {cluster.ssh_key_path})")
+
+    # Addons
+    if addons:
+        console.print(f"  Addon        : {', '.join(addons)}")
+        if cluster.metallb.enabled:
+            console.print(f"    MetalLB IP pool : {cluster.metallb.ip_pool}")
+        if cluster.longhorn.enabled and cluster.longhorn.ui_nodeport:
+            console.print(f"    Longhorn UI     : NodePort {cluster.longhorn.ui_nodeport}")
+    else:
+        console.print("  Addon        : nessuno")
 
 
 def main() -> None:

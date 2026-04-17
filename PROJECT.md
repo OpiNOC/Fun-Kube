@@ -67,7 +67,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/metallb         | scaffolding — da completare (Test 6) |
 | ansible/roles/traefik         | scaffolding — da completare (Test 7) |
 | ansible/roles/nginx-proxy-manager | scaffolding — da completare (Test 8) |
-| ansible/roles/longhorn        | ✓ implementato — da testare (Test 9) |
+| ansible/roles/longhorn        | ✓ testato (Test 9)                   |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
 
@@ -197,20 +197,23 @@ Note:
 **Dipendenza:** MetalLB (Test 6) per LoadBalancer IP
 **Stato:** DA ESEGUIRE
 
-### Test 9 — Longhorn
-**Configurazione:** cluster HA (3 CP + 3 worker), `LONGHORN_ENABLED=true`
-**Prerequisito:** disk libero sui worker (Longhorn usa block device o directory)
-**Stato:** DA ESEGUIRE
+### Test 9 — Longhorn ✓ COMPLETATO (2026-04-17)
+**Configurazione:** cluster HA (3 CP + 3 worker), `LONGHORN_ENABLED=true`, `LONGHORN_UI_NODEPORT=30080`
+**Macchine:** bootstrap (.70) + 3 CP (.71-.73) + 3 worker (.74-.76)
+**Risultato:** PASS — tutti i pod Running, StorageClass longhorn (default), UI su NodePort 30080
 
-Implementazione completata (2026-04-17):
-- nfs-common + open-iscsi + python3-yaml auto-installati su tutti i nodi
-- patch pre-apply: inserisce `strategy: Webhook` nei CRD Longhorn che hanno
-  webhookClientConfig senza strategy (incompatibile con K8s >= 1.25); fix via
-  regex string-level per evitare alterazioni del manifest da round-trip YAML
-- apply con --server-side --force-conflicts sul manifest fixato
-- wait sequenziale: DS esiste → rollout manager → rollout UI
-- dashboard UI esposta via NodePort (LONGHORN_UI_NODEPORT=<porta>, es. 30080)
+Implementazione e bug trovati/fixati:
+- nfs-common + open-iscsi auto-installati su tutti i nodi
+- apply client-side (`kubectl apply --validate=false`): evita conflitti con i campi
+  gestiti da longhorn-manager (es. conversion webhook CA bundle) che SSA con
+  --force-conflicts avrebbe sovrascritto rompendo i CRD
+- idempotenza: controlla versione installata prima dell'apply; skip se già
+  alla versione target; fail con messaggio chiaro se versione incompatibile
+- patch longhorn-frontend → NodePort idempotente (skip se già NodePort)
 - versione risolta automaticamente da GitHub releases API se non impostata in .env
+- Bug: default v1.7.2 hardcoded + fetch latest (v1.11.1) = upgrade non supportato
+  da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
+  versione sempre risolta da Python (GitHub API)
 
 ---
 

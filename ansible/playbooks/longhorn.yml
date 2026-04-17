@@ -1,7 +1,7 @@
 # Deploy Longhorn — storage distribuito
 #
-# Play 1: prerequisiti su tutti i nodi (nfs-common, open-iscsi, python3-yaml)
-# Play 2: deploy manifest Longhorn dal primo CP
+# Play 1: prerequisiti su tutti i nodi (nfs-common, open-iscsi)
+# Play 2: deploy manifest Longhorn dal primo CP (idempotente: skip se versione già corretta)
 # Play 3: patch UI NodePort (opzionale, se longhorn_ui_nodeport > 0)
 ---
 - name: Longhorn prerequisites on all nodes
@@ -13,7 +13,6 @@
         name:
           - nfs-common
           - open-iscsi
-          - python3-yaml
         state: present
         update_cache: true
       when: longhorn_enabled | default(false) | bool
@@ -30,64 +29,61 @@
   hosts: control_plane[0]
   become: true
   tasks:
+    - name: Check if longhorn-manager already installed
+      ansible.builtin.command: >
+        kubectl get daemonset longhorn-manager -n {{ longhorn_namespace }}
+        -o jsonpath='{.metadata.annotations.longhorn\.io/version}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: lh_installed_version
+      changed_when: false
+      failed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Fail if installed version is incompatible (manual intervention required)
+      ansible.builtin.fail:
+        msg: >
+          Longhorn è già installato con versione {{ lh_installed_version.stdout }},
+          ma la versione target è {{ longhorn_version }}.
+          Longhorn non supporta upgrade di più di un minor version alla volta.
+          Eseguire la procedura di upgrade manuale oppure disinstallare prima:
+            kubectl delete namespace {{ longhorn_namespace }}
+            kubectl delete crd -l app.kubernetes.io/name=longhorn
+      when:
+        - longhorn_enabled | default(false) | bool
+        - lh_installed_version.rc == 0
+        - lh_installed_version.stdout != ""
+        - lh_installed_version.stdout != longhorn_version
+
+    - name: Skip deploy if already at target version
+      ansible.builtin.debug:
+        msg: "Longhorn {{ longhorn_version }} già installato, skip apply."
+      when:
+        - longhorn_enabled | default(false) | bool
+        - lh_installed_version.rc == 0
+        - lh_installed_version.stdout == longhorn_version
+
     - name: Download Longhorn manifest
       ansible.builtin.get_url:
         url: "https://raw.githubusercontent.com/longhorn/longhorn/{{ longhorn_version }}/deploy/longhorn.yaml"
         dest: /tmp/longhorn.yaml
         mode: '0644'
         force: true
-      when: longhorn_enabled | default(false) | bool
+      when:
+        - longhorn_enabled | default(false) | bool
+        - lh_installed_version.rc != 0 or lh_installed_version.stdout == ""
 
-    - name: Fix Longhorn CRD webhook conversion spec (K8s 1.25+ compatibility)
-      # Alcuni CRD di Longhorn hanno spec.conversion.webhookClientConfig impostato
-      # ma mancano di spec.conversion.strategy, violando la validazione K8s >= 1.25.
-      # Fix: string replacement esplicito per ogni livello di indentazione possibile.
-      ansible.builtin.shell: |
-        python3 - <<'PYEOF'
-        with open('/tmp/longhorn.yaml') as f:
-            content = f.read()
-
-        # Debug: mostra le righe che contengono "conversion:" e quelle successive
-        lines = content.splitlines()
-        for i, line in enumerate(lines):
-            if 'conversion:' in line and 'webhookClientConfig' not in line:
-                ctx = lines[i:i+3]
-                print(f"  L{i}: {repr(chr(10).join(ctx))}")
-
-        original = content
-        fixed = 0
-        # Prova tutti i livelli di indentazione da 0 a 8 spazi (passo 2)
-        for n in range(0, 10, 2):
-            ind = ' ' * n
-            child = ' ' * (n + 2)
-            old = f'{ind}conversion:\n{child}webhookClientConfig:'
-            new = f'{ind}conversion:\n{child}strategy: Webhook\n{child}webhookClientConfig:'
-            if old in content:
-                content = content.replace(old, new)
-                fixed += content.count('strategy: Webhook') - original.count('strategy: Webhook')
-
-        with open('/tmp/longhorn-fixed.yaml', 'w') as f:
-            f.write(content)
-        print(f"Patched {fixed} conversion block(s)")
-        PYEOF
-      args:
-        executable: /bin/bash
-      register: patch_result
-      changed_when: false
-      when: longhorn_enabled | default(false) | bool
-
-    - name: Show CRD patch result
-      ansible.builtin.debug:
-        msg: "{{ patch_result.stdout_lines }}"
-      when: longhorn_enabled | default(false) | bool
-
-    - name: Apply Longhorn manifest (server-side)
+    - name: Apply Longhorn manifest (client-side apply)
+      # Client-side apply: non rimuove campi gestiti da longhorn-manager (es. conversion webhook CA).
+      # --validate=false: evita download schema OpenAPI su cluster isolati.
       ansible.builtin.command: >
-        kubectl apply --server-side --force-conflicts -f /tmp/longhorn-fixed.yaml
+        kubectl apply --validate=false -f /tmp/longhorn.yaml
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: true
-      when: longhorn_enabled | default(false) | bool
+      when:
+        - longhorn_enabled | default(false) | bool
+        - lh_installed_version.rc != 0 or lh_installed_version.stdout == ""
 
     - name: Wait for longhorn-manager DaemonSet to exist
       ansible.builtin.command: >
@@ -139,6 +135,19 @@
   hosts: control_plane[0]
   become: true
   tasks:
+    - name: Check current longhorn-frontend Service type
+      ansible.builtin.command: >
+        kubectl get service longhorn-frontend -n {{ longhorn_namespace }}
+        -o jsonpath='{.spec.type}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: lh_svc_type
+      changed_when: false
+      failed_when: false
+      when:
+        - longhorn_enabled | default(false) | bool
+        - longhorn_ui_nodeport | default(0) | int > 0
+
     - name: Patch longhorn-frontend Service to NodePort
       ansible.builtin.command: >
         kubectl patch service longhorn-frontend -n {{ longhorn_namespace }}
@@ -151,3 +160,4 @@
       when:
         - longhorn_enabled | default(false) | bool
         - longhorn_ui_nodeport | default(0) | int > 0
+        - lh_svc_type.stdout != "NodePort"

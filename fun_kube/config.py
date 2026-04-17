@@ -189,13 +189,31 @@ def _parse_nodes(env: dict) -> List[NodeConfig]:
     while True:
         ip = env.get(f"NODE_{i}_IP", "").strip()
         if not ip:
+            # Controlla se ci sono nodi definiti DOPO questo gap (es. NODE_3 mancante ma NODE_4 presente)
+            for j in range(i + 1, i + 20):
+                if env.get(f"NODE_{j}_IP", "").strip():
+                    raise ConfigError(
+                        f"Gap nella sequenza nodi: NODE_{i}_IP non è definito ma NODE_{j}_IP sì.\n"
+                        f"  I nodi vengono letti in sequenza — rinumera i nodi senza buchi."
+                    )
             break
+
         role = env.get(f"NODE_{i}_ROLE", "").strip().lower()
+        if not role:
+            raise ConfigError(
+                f"NODE_{i}_ROLE non definito (NODE_{i}_IP={ip}).\n"
+                f"  Valori validi: control-plane | worker"
+            )
         if role not in ("control-plane", "worker"):
             raise ConfigError(
                 f"NODE_{i}_ROLE deve essere 'control-plane' o 'worker', trovato: '{role}'"
             )
-        hostname = env.get(f"NODE_{i}_HOSTNAME", f"node{i}").strip()
+        hostname = env.get(f"NODE_{i}_HOSTNAME", "").strip()
+        if not hostname:
+            raise ConfigError(
+                f"NODE_{i}_HOSTNAME non definito (NODE_{i}_IP={ip}).\n"
+                f"  Ogni nodo deve avere un hostname univoco."
+            )
         nodes.append(NodeConfig(ip=ip, role=role, hostname=hostname))
         i += 1
     if not nodes:
