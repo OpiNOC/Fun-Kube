@@ -67,7 +67,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/metallb         | scaffolding — da completare (Test 6) |
 | ansible/roles/traefik         | scaffolding — da completare (Test 7) |
 | ansible/roles/nginx-proxy-manager | scaffolding — da completare (Test 8) |
-| ansible/roles/longhorn        | scaffolding — da completare (Test 9) |
+| ansible/roles/longhorn        | ✓ implementato — da testare (Test 9) |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
 
@@ -201,6 +201,13 @@ Note:
 **Configurazione:** cluster HA (3 CP + 3 worker), `LONGHORN_ENABLED=true`
 **Prerequisito:** disk libero sui worker (Longhorn usa block device o directory)
 **Stato:** DA ESEGUIRE
+
+Implementazione completata (2026-04-17):
+- nfs-common + open-iscsi auto-installati su tutti i nodi
+- apply con --server-side --force-conflicts
+- wait sequenziale: DS esiste → rollout manager → rollout UI
+- dashboard UI esposta via NodePort (LONGHORN_UI_NODEPORT=<porta>, es. 30080)
+- versione override via LONGHORN_VERSION in .env (default v1.7.2)
 
 ---
 
