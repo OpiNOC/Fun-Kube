@@ -1,5 +1,4 @@
 # defaults file for longhorn
+# Nota: longhorn_version e longhorn_namespace sono risolti e passati da runner.py
+# come extra_vars — non servono defaults qui.
 ---
-longhorn_version: "v1.7.2"
-longhorn_namespace: longhorn-system
-longhorn_ui_nodeport: 0   # 0 = ClusterIP (default); >0 = NodePort sulla porta specificata

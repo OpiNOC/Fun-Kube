@@ -34,8 +34,9 @@ _PLAYBOOK_DIR = _ANSIBLE_DIR / "playbooks"
 
 def run_core(cluster: ClusterConfig, debug: bool = False) -> None:
     k8s_version_resolved = _resolve_k8s_version(cluster.k8s_version)
+    longhorn_version_resolved = _resolve_longhorn_version(cluster.longhorn.version) if cluster.longhorn.enabled else ""
     inventory_path = _write_inventory(cluster)
-    extra_vars = _build_extra_vars(cluster, k8s_version_resolved)
+    extra_vars = _build_extra_vars(cluster, k8s_version_resolved, longhorn_version_resolved)
 
     playbooks = _build_playbook_sequence(cluster)
 
@@ -319,6 +320,24 @@ def _resolve_k8s_version(k8s_version: str) -> str:
     return version
 
 
+def _resolve_longhorn_version(longhorn_version: str) -> str:
+    if longhorn_version:
+        v = longhorn_version if longhorn_version.startswith("v") else f"v{longhorn_version}"
+        console.print(f"  [green]✓[/]  longhorn version: {v}")
+        return v
+    console.print("  [cyan]▶[/]  resolving latest longhorn version...")
+    import json as _json
+    req = urllib.request.Request(
+        "https://api.github.com/repos/longhorn/longhorn/releases/latest",
+        headers={"Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = _json.loads(resp.read().decode())
+    version = data["tag_name"]
+    console.print(f"  [green]✓[/]  longhorn version: {version}")
+    return version
+
+
 # ---------------------------------------------------------------------------
 # Inventory
 # ---------------------------------------------------------------------------
@@ -360,7 +379,7 @@ def _write_inventory(cluster: ClusterConfig) -> Path:
 # Extra vars per Ansible
 # ---------------------------------------------------------------------------
 
-def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict:
+def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhorn_version_resolved: str = "") -> dict:
     return {
         "cluster_name": cluster.cluster_name,
         "topology": cluster.topology,
@@ -387,7 +406,8 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict
         "longhorn_enabled": cluster.longhorn.enabled,
         "longhorn_rwx": cluster.longhorn.rwx,
         "longhorn_ui_nodeport": cluster.longhorn.ui_nodeport,
-        **({"longhorn_version": cluster.longhorn.version} if cluster.longhorn.version else {}),
+        "longhorn_namespace": "longhorn-system",
+        "longhorn_version": longhorn_version_resolved,
     }
 
 
