@@ -34,7 +34,8 @@ class KeepalivedConfig:
 @dataclass
 class MetalLBConfig:
     enabled: bool
-    ip_pool: str  # es. "10.0.0.200-10.0.0.220"
+    ip_pool: str   # es. "10.0.0.200-10.0.0.220"
+    version: str   # es. "v0.14.9" — vuoto = risolto da GitHub
 
 
 @dataclass
@@ -144,12 +145,13 @@ def load(env_file: Path) -> ClusterConfig:
         metallb=MetalLBConfig(
             enabled=_bool(env, "METALLB_ENABLED"),
             ip_pool=env.get("METALLB_IP_POOL", ""),
+            version=env.get("METALLB_VERSION", "").strip(),
         ),
         ingress=_parse_ingress(env),
         longhorn=LonghornConfig(
             enabled=_bool(env, "LONGHORN_ENABLED"),
             rwx=_bool(env, "LONGHORN_RWX"),
-            ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "0") or "0"),
+            ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "30080") or "30080"),
             version=env.get("LONGHORN_VERSION", "").strip(),
         ),
         topology=topology,

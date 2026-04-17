@@ -35,8 +35,9 @@ _PLAYBOOK_DIR = _ANSIBLE_DIR / "playbooks"
 def run_core(cluster: ClusterConfig, debug: bool = False) -> None:
     k8s_version_resolved = _resolve_k8s_version(cluster.k8s_version)
     longhorn_version_resolved = _resolve_longhorn_version(cluster.longhorn.version) if cluster.longhorn.enabled else ""
+    metallb_version_resolved = _resolve_metallb_version(cluster.metallb.version) if cluster.metallb.enabled else ""
     inventory_path = _write_inventory(cluster)
-    extra_vars = _build_extra_vars(cluster, k8s_version_resolved, longhorn_version_resolved)
+    extra_vars = _build_extra_vars(cluster, k8s_version_resolved, longhorn_version_resolved, metallb_version_resolved)
 
     playbooks = _build_playbook_sequence(cluster)
 
@@ -103,6 +104,30 @@ def write_output(cluster: ClusterConfig) -> None:
             "# Keepalived",
             f"VIP:             {cluster.keepalived.vip}",
             f"Interface:       {cluster.keepalived.interface}",
+        ]
+
+    if cluster.metallb.enabled:
+        lines += [
+            "",
+            "# MetalLB",
+            f"IP pool:         {cluster.metallb.ip_pool}",
+            "kubectl get ipaddresspool -n metallb-system",
+            "kubectl get svc -A | grep LoadBalancer",
+        ]
+
+    if cluster.longhorn.enabled:
+        lh_ui = (
+            f"http://{cluster.api_endpoint}:{cluster.longhorn.ui_nodeport}"
+            if cluster.longhorn.ui_nodeport else "NodePort disabilitato"
+        )
+        lines += [
+            "",
+            "# Longhorn",
+            f"Namespace:       longhorn-system",
+            f"UI:              {lh_ui}",
+            f"RWX:             {'abilitato (StorageClass: longhorn-rwx)' if cluster.longhorn.rwx else 'disabilitato'}",
+            "kubectl get storageclass",
+            "kubectl get pods -n longhorn-system",
         ]
 
     lines += [
@@ -257,6 +282,41 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
             f"Keepalived interface: {cluster.keepalived.interface}",
         ]
 
+    if cluster.metallb.enabled:
+        lines += [
+            "",
+            "ADDON — MetalLB",
+            "-" * 40,
+            "",
+            f"IP pool:  {cluster.metallb.ip_pool}",
+            f"Versione: {cluster.metallb.version or 'risolto da GitHub API'}",
+            "",
+            "Verifica:",
+            "  kubectl get ipaddresspool -n metallb-system",
+            "  kubectl get l2advertisement -n metallb-system",
+            "  kubectl get svc -A | grep LoadBalancer",
+        ]
+
+    if cluster.longhorn.enabled:
+        lh_ui = (
+            f"http://{cluster.api_endpoint}:{cluster.longhorn.ui_nodeport}"
+            if cluster.longhorn.ui_nodeport else "NodePort disabilitato"
+        )
+        lines += [
+            "",
+            "ADDON — Longhorn",
+            "-" * 40,
+            "",
+            f"Namespace:  longhorn-system",
+            f"Versione:   {cluster.longhorn.version or 'risolto da GitHub API'}",
+            f"UI:         {lh_ui}",
+            f"RWX:        {'abilitato (StorageClass: longhorn-rwx)' if cluster.longhorn.rwx else 'disabilitato'}",
+            "",
+            "Verifica:",
+            "  kubectl get pods -n longhorn-system",
+            "  kubectl get storageclass",
+        ]
+
     dest = Path(f"/root/{cluster.cluster_name}-manutenzione.txt")
     dest.write_text("\n".join(lines) + "\n")
     console.print(f"  [green]✓[/]  file manutenzione → {dest}")
@@ -296,6 +356,9 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
 
     playbooks.append("bootstrap-kubeconfig.yml")
 
+    if cluster.metallb.enabled:
+        playbooks.append("metallb.yml")
+
     if cluster.longhorn.enabled:
         playbooks.append("longhorn.yml")
 
@@ -317,6 +380,24 @@ def _resolve_k8s_version(k8s_version: str) -> str:
     ) as resp:
         version = resp.read().decode().strip()
     console.print(f"  [green]✓[/]  k8s version: {version}")
+    return version
+
+
+def _resolve_metallb_version(metallb_version: str) -> str:
+    if metallb_version:
+        v = metallb_version if metallb_version.startswith("v") else f"v{metallb_version}"
+        console.print(f"  [green]✓[/]  metallb version: {v}")
+        return v
+    console.print("  [cyan]▶[/]  resolving latest metallb version...")
+    import json as _json
+    req = urllib.request.Request(
+        "https://api.github.com/repos/metallb/metallb/releases/latest",
+        headers={"Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = _json.loads(resp.read().decode())
+    version = data["tag_name"]
+    console.print(f"  [green]✓[/]  metallb version: {version}")
     return version
 
 
@@ -379,7 +460,7 @@ def _write_inventory(cluster: ClusterConfig) -> Path:
 # Extra vars per Ansible
 # ---------------------------------------------------------------------------
 
-def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhorn_version_resolved: str = "") -> dict:
+def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhorn_version_resolved: str = "", metallb_version_resolved: str = "") -> dict:
     return {
         "cluster_name": cluster.cluster_name,
         "topology": cluster.topology,
@@ -402,6 +483,10 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhor
         "keepalived_interface": cluster.keepalived.interface,
         # Timezone
         "cluster_timezone": cluster.cluster_timezone,
+        # MetalLB
+        "metallb_enabled": cluster.metallb.enabled,
+        "metallb_ip_pool": cluster.metallb.ip_pool,
+        "metallb_version": metallb_version_resolved,
         # Longhorn
         "longhorn_enabled": cluster.longhorn.enabled,
         "longhorn_rwx": cluster.longhorn.rwx,

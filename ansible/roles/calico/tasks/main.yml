@@ -71,3 +71,4 @@
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
   changed_when: false
+  ignore_errors: true

@@ -1,23 +1,48 @@
 # tasks file for metallb
 ---
+- name: Check installed MetalLB version
+  ansible.builtin.shell: |
+    kubectl get deployment controller -n metallb-system \
+      -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null \
+      | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || true
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  register: metallb_installed_version
+  changed_when: false
+  failed_when: false
+
+- name: Skip deploy if already at target version
+  ansible.builtin.debug:
+    msg: "MetalLB {{ metallb_version }} già installato, skip apply."
+  when: metallb_installed_version.stdout == metallb_version
+  run_once: true
+
 - name: Download MetalLB manifest
   ansible.builtin.get_url:
     url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
     dest: /tmp/metallb-native.yaml
     mode: '0644'
+    force: true
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
+  when: metallb_installed_version.stdout != metallb_version
 
 - name: Apply MetalLB manifest
-  ansible.builtin.command: kubectl apply -f /tmp/metallb-native.yaml
+  ansible.builtin.command: kubectl apply --validate=false -f /tmp/metallb-native.yaml
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
-  changed_when: true
+  register: _metallb_apply
+  changed_when: "'configured' in _metallb_apply.stdout or 'created' in _metallb_apply.stdout"
+  when: metallb_installed_version.stdout != metallb_version
 
 - name: Wait for MetalLB pods to be running
-  ansible.builtin.command: |
+  ansible.builtin.command: >
     kubectl wait --for=condition=Ready pod --all -n metallb-system --timeout=300s
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
@@ -26,7 +51,7 @@
   changed_when: false
   ignore_errors: true
 
-- name: Apply MetalLB IPAddressPool
+- name: Render MetalLB IPAddressPool manifest
   ansible.builtin.template:
     src: ipaddresspool.yaml.j2
     dest: /tmp/metallb-ipaddresspool.yaml
@@ -34,7 +59,7 @@
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
 
-- name: Apply MetalLB L2Advertisement
+- name: Render MetalLB L2Advertisement manifest
   ansible.builtin.template:
     src: l2advertisement.yaml.j2
     dest: /tmp/metallb-l2advertisement.yaml
@@ -42,11 +67,19 @@
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
 
-- name: Apply MetalLB configuration
-  ansible.builtin.command: |
-    kubectl apply -f /tmp/metallb-ipaddresspool.yaml -f /tmp/metallb-l2advertisement.yaml
+- name: Apply MetalLB IPAddressPool and L2Advertisement
+  ansible.builtin.shell: >
+    kubectl apply --validate=false
+    -f /tmp/metallb-ipaddresspool.yaml
+    -f /tmp/metallb-l2advertisement.yaml
+  args:
+    executable: /bin/bash
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
-  changed_when: true
+  register: _metallb_cfg
+  until: _metallb_cfg.rc == 0
+  retries: 12
+  delay: 10
+  changed_when: "'configured' in _metallb_cfg.stdout or 'created' in _metallb_cfg.stdout"

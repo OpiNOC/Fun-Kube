@@ -120,12 +120,47 @@
       changed_when: false
       when: longhorn_enabled | default(false) | bool
 
+    - name: Create longhorn-rwx StorageClass
+      ansible.builtin.shell: |
+        kubectl apply --validate=false -f - <<'EOF'
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: longhorn-rwx
+        provisioner: driver.longhorn.io
+        allowVolumeExpansion: true
+        reclaimPolicy: Delete
+        volumeBindingMode: Immediate
+        parameters:
+          numberOfReplicas: "3"
+          staleReplicaTimeout: "30"
+          fromBackup: ""
+          fsType: "ext4"
+          dataLocality: "disabled"
+          unmapMarkSnapChainRemoved: "ignored"
+          disableRevisionCounter: "true"
+          dataEngine: "v1"
+          backupTargetName: "default"
+          nfsOptions: "vers=4.1,noresvport"
+        EOF
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: _lh_rwx_sc
+      until: _lh_rwx_sc.rc == 0
+      retries: 6
+      delay: 10
+      changed_when: "'created' in _lh_rwx_sc.stdout or 'configured' in _lh_rwx_sc.stdout"
+      when:
+        - longhorn_enabled | default(false) | bool
+        - longhorn_rwx | default(false) | bool
+
     - name: Verify longhorn-rwx StorageClass
       ansible.builtin.command: kubectl get storageclass longhorn-rwx
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: false
-      ignore_errors: true
       when:
         - longhorn_enabled | default(false) | bool
         - longhorn_rwx | default(false) | bool

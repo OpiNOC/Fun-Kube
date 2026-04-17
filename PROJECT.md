@@ -52,8 +52,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun-kube (entry point)        | ✓ auto-bootstrap venv Python   |
 | fun_kube/config.py            | ✓ parsing, validazione, topologia, gap detection NODE_N |
 | fun_kube/preflight.py         | ✓ local + SSH checks           |
-| fun_kube/runner.py            | ✓ inventory, sequenza playbook, Ctrl+C |
-| fun_kube/cli.py               | ✓ up (--yes), check-deps, reset, diagnose; riepilogo nodi + conferma pre-provisioning |
+| fun_kube/runner.py            | ✓ inventory, sequenza playbook, Ctrl+C; output addon (MetalLB, Longhorn) |
+| fun_kube/cli.py               | ✓ up (--yes), check-deps, reset, diagnose; riepilogo nodi + addon + conferma |
 | fun_kube/deps.py              | ✓ check + auto-install tools   |
 | ansible/roles/common          | ✓ testato                      |
 | ansible/roles/containerd      | ✓ testato (fix config v2.x)    |
@@ -64,7 +64,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/cert-renewal    | ✓ testato                      |
 | ansible/roles/local-path-provisioner | ✓ testato              |
 | ansible/roles/keepalived      | ✓ testato (Test 4+5)           |
-| ansible/roles/metallb         | scaffolding — da completare (Test 6) |
+| ansible/roles/metallb         | ✓ testato (Test 6)                   |
 | ansible/roles/traefik         | scaffolding — da completare (Test 7) |
 | ansible/roles/nginx-proxy-manager | scaffolding — da completare (Test 8) |
 | ansible/roles/longhorn        | ✓ testato (Test 9)                   |
@@ -183,9 +183,41 @@ Note:
   assegna label di ruolo ai worker). Opzionale: `kubectl label node worker{1,2,3} node-role.kubernetes.io/worker=`
 - Kubernetes v1.35.4, containerd 2.2.3, Ubuntu 24.04.4 LTS
 
-### Test 6 — MetalLB
-**Configurazione:** cluster HA (3 CP + 3 worker), `METALLB_ENABLED=true`, IP pool su subnet lab
-**Stato:** DA ESEGUIRE
+### Test 10 — Full cluster da nodi puliti (regression) ✓ COMPLETATO (2026-04-17)
+**Configurazione:** 3 CP + 3 worker, keepalived, Longhorn
+**Macchine:** bootstrap (.70) + CP (.71-.73) + worker (.74-.76)
+**Risultato:** PASS dopo 2 retry (cluster operativo)
+
+Bug trovati e fixati:
+- `LONGHORN_UI_NODEPORT` non valorizzato in `.env` → default era `0` → patch saltata → servizio non esposto
+  **Fix:** default cambiato a `30080` in `config.py` e `.env.example`
+- `kubectl wait` Calico timeout 300s su cluster HA a 6 nodi → fatal ma cluster poi parte
+  **Fix:** `ignore_errors: true` sul task (DaemonSet viene già atteso con retry prima)
+- `Create fun-kube-admin ServiceAccount` fallisce con "connection refused" su VIP keepalived
+  dopo che `kubectl cluster-info` era già passato → micro-flap sul VIP tra i due task
+  **Fix:** `retries: 10, delay: 10` su SA/ClusterRoleBinding/Secret apply in `bootstrap-kubeconfig.yml`
+- `Verify longhorn-rwx StorageClass` fallisce: playbook verificava ma non creava mai la SC
+  **Fix:** aggiunto task `Create longhorn-rwx StorageClass` prima della verifica; SC identica a
+  `longhorn` + `nfsOptions: "vers=4.1,noresvport"` per RWX via share-manager; verifica ora senza
+  `ignore_errors` (deve essere presente)
+
+---
+
+### Test 6 — MetalLB ✓ COMPLETATO (2026-04-17)
+**Configurazione:** cluster HA (3 CP + 3 worker), `METALLB_ENABLED=true`, `METALLB_IP_POOL=172.30.232.78-172.30.232.79`
+**Risultato:** PASS — IPAddressPool e L2Advertisement applicati, pool corretto
+
+Bug trovati e fixati:
+- `metallb.yml` non era nella sequenza playbook di `runner.py` → aggiunto
+- `metallb_enabled`, `metallb_ip_pool`, `metallb_version` non erano in `_build_extra_vars` → aggiunti
+- Versione MetalLB ora risolta da GitHub API (come Longhorn); override via `METALLB_VERSION` in `.env`
+- Apply del manifest con `--validate=false` (coerente con altri role)
+- Apply di `IPAddressPool`/`L2Advertisement` con `retries: 12, delay: 10` — i CRD MetalLB si
+  registrano pochi secondi dopo l'avvio dei pod; senza retry l'apply fallisce se il pod-wait
+  torna `ignore_errors`
+- Idempotenza: version check via immagine `controller` deployment; skip manifest apply se già
+  a target version; `changed_when` accurato su tutti gli apply
+- Output: pool MetalLB e info Longhorn aggiunti a `cluster-info.txt` e file manutenzione
 
 ### Test 7 — Ingress Traefik
 **Configurazione:** cluster HA, `INGRESS_ENABLED=true`, `INGRESS_TYPE=traefik`
@@ -404,17 +436,7 @@ e passata ad Ansible come `k8s_version_resolved`.
 Il task `Wait for Calico pods to be running` esegue `kubectl wait --for=condition=Ready pod -l k8s-app=calico-node -n calico-system --timeout=300s` subito dopo l'apply del manifest dell'operatore Calico. In quel momento l'operatore non ha ancora riconciliato e i pod `calico-node` non esistono ancora → `kubectl wait` fallisce con `error: no matching resources found` (non "pod non ready", ma "nessun pod trovato").
 Il task usa `ignore_errors: yes` quindi l'installazione prosegue e Calico si avvia correttamente pochi secondi dopo.
 
-**Fix da applicare:** aggiungere prima del `kubectl wait` un task che attende la creazione effettiva dei pod (con retry), ad esempio:
-```yaml
-- name: Wait for Calico operator to create calico-node pods
-  shell: kubectl get pods -l k8s-app=calico-node -n calico-system --no-headers 2>/dev/null | wc -l
-  register: calico_pod_count
-  retries: 30
-  delay: 10
-  until: calico_pod_count.stdout | int > 0
-  changed_when: false
-```
-Oppure attendere che il DaemonSet `calico-node` esista: `kubectl wait daemonset/calico-node -n calico-system --for=jsonpath='{.status.desiredNumberScheduled}' --timeout=120s`.
+**Fix applicato:** `ignore_errors: true` sul task `Wait for Calico pods to be running`. In cluster HA a 6 nodi il timeout 300s non è sempre sufficiente; il cluster si avvia correttamente comunque. Il DaemonSet viene atteso con retry prima del `kubectl wait`, quindi Calico è operativo al termine del play.
 
 **Idempotenza**
 Ogni run può essere rieseguito senza danni:

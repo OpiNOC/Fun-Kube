@@ -310,7 +310,9 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
     if addons:
         console.print(f"  Addon        : {', '.join(addons)}")
         if cluster.metallb.enabled:
-            console.print(f"    MetalLB IP pool : {cluster.metallb.ip_pool}")
+            mlb_ver = cluster.metallb.version or "latest (GitHub API)"
+            console.print(f"    MetalLB versione  : {mlb_ver}")
+            console.print(f"    MetalLB IP pool   : {cluster.metallb.ip_pool}")
         if cluster.longhorn.enabled:
             lh_ver = cluster.longhorn.version or "latest (GitHub API)"
             lh_rwx = "sì" if cluster.longhorn.rwx else "no"
