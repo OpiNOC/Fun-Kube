@@ -1,6 +1,6 @@
 # Deploy Longhorn — storage distribuito
 #
-# Play 1: prerequisiti su tutti i nodi (nfs-common, open-iscsi)
+# Play 1: prerequisiti su tutti i nodi (nfs-common, open-iscsi, python3-yaml)
 # Play 2: deploy manifest Longhorn dal primo CP
 # Play 3: patch UI NodePort (opzionale, se longhorn_ui_nodeport > 0)
 ---
@@ -13,6 +13,7 @@
         name:
           - nfs-common
           - open-iscsi
+          - python3-yaml
         state: present
         update_cache: true
       when: longhorn_enabled | default(false) | bool
@@ -37,9 +38,40 @@
         force: true
       when: longhorn_enabled | default(false) | bool
 
+    - name: Fix Longhorn CRD webhook conversion spec (K8s 1.25+ compatibility)
+      # Alcuni CRD di Longhorn hanno spec.conversion.webhookClientConfig impostato
+      # ma mancano di spec.conversion.strategy, violando la validazione K8s >= 1.25.
+      # Fix: rimuove spec.conversion dai CRD affetti prima dell'apply.
+      ansible.builtin.shell: |
+        python3 - <<'PYEOF'
+        import yaml
+
+        with open('/tmp/longhorn.yaml') as f:
+            content = f.read()
+
+        fixed = []
+        patched = 0
+        for doc in yaml.safe_load_all(content):
+            if doc and doc.get('kind') == 'CustomResourceDefinition':
+                conv = doc.get('spec', {}).get('conversion', {})
+                if conv.get('webhookClientConfig') and not conv.get('strategy'):
+                    del doc['spec']['conversion']
+                    patched += 1
+            fixed.append(doc)
+
+        with open('/tmp/longhorn-fixed.yaml', 'w') as f:
+            yaml.dump_all(fixed, f, default_flow_style=False, allow_unicode=True)
+
+        print(f"Patched {patched} CRD(s), total {len(fixed)} documents written to /tmp/longhorn-fixed.yaml")
+        PYEOF
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: longhorn_enabled | default(false) | bool
+
     - name: Apply Longhorn manifest (server-side)
       ansible.builtin.command: >
-        kubectl apply --server-side --force-conflicts -f /tmp/longhorn.yaml
+        kubectl apply --server-side --force-conflicts -f /tmp/longhorn-fixed.yaml
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: true
