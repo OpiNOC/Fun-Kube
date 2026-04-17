@@ -63,11 +63,11 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/cert-manager    | ✓ testato                      |
 | ansible/roles/cert-renewal    | ✓ testato                      |
 | ansible/roles/local-path-provisioner | ✓ testato              |
-| ansible/roles/keepalived      | scaffolding — non testato      |
-| ansible/roles/metallb         | scaffolding — non testato      |
-| ansible/roles/traefik         | scaffolding — non testato      |
-| ansible/roles/nginx-proxy-manager | scaffolding — non testato  |
-| ansible/roles/longhorn        | scaffolding — non testato      |
+| ansible/roles/keepalived      | ✓ testato (Test 4+5)           |
+| ansible/roles/metallb         | scaffolding — da completare (Test 6) |
+| ansible/roles/traefik         | scaffolding — da completare (Test 7) |
+| ansible/roles/nginx-proxy-manager | scaffolding — da completare (Test 8) |
+| ansible/roles/longhorn        | scaffolding — da completare (Test 9) |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
 
@@ -152,8 +152,7 @@ Bug trovati e fixati:
 
 ### Test 3 — Single CP con worker
 **Configurazione:** 1 CP + N worker, SSH da bootstrap esterna
-**Macchine:** bootstrap + CP (es. .71) + worker (es. .74, .75)
-**Stato:** da eseguire
+**Stato:** SALTATO — topologia coperta implicitamente dal Test 5 (HA funziona, single-cp è subset)
 
 ### Test 4 — HA multi CP (solo CP, senza worker) ✓ COMPLETATO (2026-04-17)
 **Configurazione:** 3 CP, keepalived VIP, nessun worker
@@ -174,6 +173,7 @@ del check). L'installazione va a buon fine, ma il task è ignorato con `ignore_e
 Da fixare: vedi sezione Note Tecniche.
 
 ### Test 5 — HA multi CP completo (3 CP + 3 worker) ✓ COMPLETATO (2026-04-17)
+
 **Configurazione:** 3 CP + 3 worker, keepalived VIP
 **Macchine:** bootstrap (.70) + 3 CP (.71-.73) + 3 worker (.74-.76)
 **Risultato:** PASS — cluster HA completo funzionante, tutti e 6 i nodi Ready
@@ -182,6 +182,25 @@ Note:
 - Worker nodes mostrano ROLES=`<none>`: comportamento standard Kubernetes (kubeadm non
   assegna label di ruolo ai worker). Opzionale: `kubectl label node worker{1,2,3} node-role.kubernetes.io/worker=`
 - Kubernetes v1.35.4, containerd 2.2.3, Ubuntu 24.04.4 LTS
+
+### Test 6 — MetalLB
+**Configurazione:** cluster HA (3 CP + 3 worker), `METALLB_ENABLED=true`, IP pool su subnet lab
+**Stato:** DA ESEGUIRE
+
+### Test 7 — Ingress Traefik
+**Configurazione:** cluster HA, `INGRESS_ENABLED=true`, `INGRESS_TYPE=traefik`
+**Dipendenza:** MetalLB (Test 6) per LoadBalancer IP
+**Stato:** DA ESEGUIRE
+
+### Test 8 — Ingress Nginx Proxy Manager
+**Configurazione:** cluster HA, `INGRESS_ENABLED=true`, `INGRESS_TYPE=nginx-proxy-manager`
+**Dipendenza:** MetalLB (Test 6) per LoadBalancer IP
+**Stato:** DA ESEGUIRE
+
+### Test 9 — Longhorn
+**Configurazione:** cluster HA (3 CP + 3 worker), `LONGHORN_ENABLED=true`
+**Prerequisito:** disk libero sui worker (Longhorn usa block device o directory)
+**Stato:** DA ESEGUIRE
 
 ---
 
