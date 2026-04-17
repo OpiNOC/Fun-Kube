@@ -41,28 +41,27 @@
     - name: Fix Longhorn CRD webhook conversion spec (K8s 1.25+ compatibility)
       # Alcuni CRD di Longhorn hanno spec.conversion.webhookClientConfig impostato
       # ma mancano di spec.conversion.strategy, violando la validazione K8s >= 1.25.
-      # Fix: rimuove spec.conversion dai CRD affetti prima dell'apply.
+      # Fix: inserisce "strategy: Webhook" nei blocchi conversion incompleti,
+      # operando a livello di stringa per evitare round-trip YAML che altera il manifest.
       ansible.builtin.shell: |
         python3 - <<'PYEOF'
-        import yaml
+        import re
 
         with open('/tmp/longhorn.yaml') as f:
             content = f.read()
 
-        fixed = []
-        patched = 0
-        for doc in yaml.safe_load_all(content):
-            if doc and doc.get('kind') == 'CustomResourceDefinition':
-                conv = doc.get('spec', {}).get('conversion', {})
-                if conv.get('webhookClientConfig') and not conv.get('strategy'):
-                    del doc['spec']['conversion']
-                    patched += 1
-            fixed.append(doc)
+        # Trova blocchi "conversion:" seguiti da "webhookClientConfig:" senza "strategy:"
+        # e inserisce "strategy: Webhook" con indentazione corretta.
+        patched, count = re.subn(
+            r'(\n( +)conversion:\n)(?![ \t]+strategy:)([ \t]+webhookClientConfig:)',
+            lambda m: m.group(1) + m.group(2) + '  strategy: Webhook\n' + m.group(3),
+            content
+        )
 
         with open('/tmp/longhorn-fixed.yaml', 'w') as f:
-            yaml.dump_all(fixed, f, default_flow_style=False, allow_unicode=True)
+            f.write(patched)
 
-        print(f"Patched {patched} CRD(s), total {len(fixed)} documents written to /tmp/longhorn-fixed.yaml")
+        print(f"Inserted 'strategy: Webhook' in {count} conversion block(s)")
         PYEOF
       args:
         executable: /bin/bash
