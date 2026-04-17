@@ -50,10 +50,10 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | Componente                    | Stato                          |
 |-------------------------------|--------------------------------|
 | fun-kube (entry point)        | ✓ auto-bootstrap venv Python   |
-| fun_kube/config.py            | ✓ parsing, validazione, topologia |
+| fun_kube/config.py            | ✓ parsing, validazione, topologia, gap detection NODE_N |
 | fun_kube/preflight.py         | ✓ local + SSH checks           |
 | fun_kube/runner.py            | ✓ inventory, sequenza playbook, Ctrl+C |
-| fun_kube/cli.py               | ✓ up, check-deps, reset, diagnose, Ctrl+C |
+| fun_kube/cli.py               | ✓ up (--yes), check-deps, reset, diagnose; riepilogo nodi + conferma pre-provisioning |
 | fun_kube/deps.py              | ✓ check + auto-install tools   |
 | ansible/roles/common          | ✓ testato                      |
 | ansible/roles/containerd      | ✓ testato (fix config v2.x)    |
@@ -327,6 +327,7 @@ CIDR da tenere non sovrapposti: `POD_CIDR`, `SERVICE_CIDR`, `METALLB_IP_POOL`.
   --dry-run                   # solo validazione, nessuna modifica
   --debug                     # output verboso (ansible -vv)
   --skip-checks               # salta preflight
+  --yes / -y                  # salta la conferma interattiva (es. automazione)
 
 ./fun-kube check-deps         # verifica + installa tool bootstrap
   --verbose                   # mostra versioni
@@ -336,6 +337,14 @@ CIDR da tenere non sovrapposti: `POD_CIDR`, `SERVICE_CIDR`, `METALLB_IP_POOL`.
 
 ./fun-kube diagnose [.env]    # stato nodi (kubelet, k8s, disk, ram)
 ```
+
+Prima del provisioning viene sempre mostrato un riepilogo con:
+- Tabella nodi: hostname, IP, ruolo
+- CIDRs, SSH key, VIP keepalived (se HA)
+- Addon abilitati con dettagli:
+  - Longhorn: versione, RWX, URL dashboard (`http://<VIP>:<nodeport>`)
+  - MetalLB: IP pool
+- Richiesta di conferma esplicita (`Procedere? [y/N]`)
 
 ---
 

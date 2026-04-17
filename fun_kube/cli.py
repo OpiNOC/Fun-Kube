@@ -311,8 +311,16 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
         console.print(f"  Addon        : {', '.join(addons)}")
         if cluster.metallb.enabled:
             console.print(f"    MetalLB IP pool : {cluster.metallb.ip_pool}")
-        if cluster.longhorn.enabled and cluster.longhorn.ui_nodeport:
-            console.print(f"    Longhorn UI     : NodePort {cluster.longhorn.ui_nodeport}")
+        if cluster.longhorn.enabled:
+            lh_ver = cluster.longhorn.version or "latest (GitHub API)"
+            lh_rwx = "sì" if cluster.longhorn.rwx else "no"
+            if cluster.longhorn.ui_nodeport:
+                lh_ui = f"http://{cluster.api_endpoint}:{cluster.longhorn.ui_nodeport}"
+            else:
+                lh_ui = "disabilitata"
+            console.print(f"    Longhorn versione : {lh_ver}")
+            console.print(f"    Longhorn RWX      : {lh_rwx}")
+            console.print(f"    Longhorn UI       : {lh_ui}")
     else:
         console.print("  Addon        : nessuno")
 
