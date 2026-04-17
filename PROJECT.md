@@ -203,11 +203,13 @@ Note:
 **Stato:** DA ESEGUIRE
 
 Implementazione completata (2026-04-17):
-- nfs-common + open-iscsi auto-installati su tutti i nodi
-- apply con --server-side --force-conflicts
+- nfs-common + open-iscsi + python3-yaml auto-installati su tutti i nodi
+- patch pre-apply: rimuove spec.conversion corrotta dai CRD Longhorn (bug
+  webhookClientConfig senza strategy, incompatibile con K8s >= 1.25)
+- apply con --server-side --force-conflicts sul manifest fixato
 - wait sequenziale: DS esiste → rollout manager → rollout UI
 - dashboard UI esposta via NodePort (LONGHORN_UI_NODEPORT=<porta>, es. 30080)
-- versione override via LONGHORN_VERSION in .env (default v1.7.2)
+- versione risolta automaticamente da GitHub releases API se non impostata in .env
 
 ---
 
