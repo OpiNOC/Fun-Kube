@@ -41,31 +41,44 @@
     - name: Fix Longhorn CRD webhook conversion spec (K8s 1.25+ compatibility)
       # Alcuni CRD di Longhorn hanno spec.conversion.webhookClientConfig impostato
       # ma mancano di spec.conversion.strategy, violando la validazione K8s >= 1.25.
-      # Fix: inserisce "strategy: Webhook" nei blocchi conversion incompleti,
-      # operando a livello di stringa per evitare round-trip YAML che altera il manifest.
+      # Fix: string replacement esplicito per ogni livello di indentazione possibile.
       ansible.builtin.shell: |
         python3 - <<'PYEOF'
-        import re
-
         with open('/tmp/longhorn.yaml') as f:
             content = f.read()
 
-        # Trova blocchi "conversion:" seguiti da "webhookClientConfig:" senza "strategy:"
-        # e inserisce "strategy: Webhook" con indentazione corretta.
-        patched, count = re.subn(
-            r'(\n( +)conversion:\n)(?![ \t]+strategy:)([ \t]+webhookClientConfig:)',
-            lambda m: m.group(1) + m.group(2) + '  strategy: Webhook\n' + m.group(3),
-            content
-        )
+        # Debug: mostra le righe che contengono "conversion:" e quelle successive
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
+            if 'conversion:' in line and 'webhookClientConfig' not in line:
+                ctx = lines[i:i+3]
+                print(f"  L{i}: {repr(chr(10).join(ctx))}")
+
+        original = content
+        fixed = 0
+        # Prova tutti i livelli di indentazione da 0 a 8 spazi (passo 2)
+        for n in range(0, 10, 2):
+            ind = ' ' * n
+            child = ' ' * (n + 2)
+            old = f'{ind}conversion:\n{child}webhookClientConfig:'
+            new = f'{ind}conversion:\n{child}strategy: Webhook\n{child}webhookClientConfig:'
+            if old in content:
+                content = content.replace(old, new)
+                fixed += content.count('strategy: Webhook') - original.count('strategy: Webhook')
 
         with open('/tmp/longhorn-fixed.yaml', 'w') as f:
-            f.write(patched)
-
-        print(f"Inserted 'strategy: Webhook' in {count} conversion block(s)")
+            f.write(content)
+        print(f"Patched {fixed} conversion block(s)")
         PYEOF
       args:
         executable: /bin/bash
+      register: patch_result
       changed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Show CRD patch result
+      ansible.builtin.debug:
+        msg: "{{ patch_result.stdout_lines }}"
       when: longhorn_enabled | default(false) | bool
 
     - name: Apply Longhorn manifest (server-side)
