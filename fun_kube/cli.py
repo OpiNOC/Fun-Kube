@@ -163,6 +163,13 @@ def reset(
             raise typer.Exit(0)
 
     reset_script = (
+        # Stop kubelet first to release CSI/iSCSI/NFS mounts (e.g. Longhorn volumes)
+        # that would otherwise cause `kubeadm reset` to hang indefinitely.
+        "sudo systemctl stop kubelet 2>/dev/null || true; "
+        "sudo systemctl stop iscsid 2>/dev/null || true; "
+        "for m in $(grep -E 'kubelet|longhorn|csi' /proc/mounts 2>/dev/null | awk '{print $2}' | sort -r); do "
+        "  sudo umount -f -l \"$m\" 2>/dev/null || true; "
+        "done; "
         "sudo kubeadm reset -f 2>/dev/null || true; "
         "sudo rm -rf /etc/kubernetes /var/lib/etcd /var/lib/kubelet "
         "         /etc/cni/net.d /opt/cni/bin /root/.kube; "
