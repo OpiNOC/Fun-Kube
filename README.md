@@ -32,11 +32,12 @@ Se non definisci worker, i nodi control-plane vengono detaintati automaticamente
 **Cluster core** (sempre):
 - containerd, kubelet, kubeadm, kubectl
 - Calico CNI
-- metrics-server
+- metrics-server (`kubectl top nodes/pods` funziona subito)
 - cert-manager
 - Rinnovo automatico certificati (systemd timer mensile su ogni CP)
 - keepalived (solo HA)
 - local-path-provisioner + StorageClass default (solo mononodo)
+- `alias k=kubectl` e autocompletamento kubectl configurati in `~/.bashrc` sulla bootstrap machine
 
 **Addon opzionali** (abilitati via `.env`):
 
@@ -78,22 +79,20 @@ Tutte le dipendenze (Python, Ansible, kubectl, Helm) vengono **installate automa
 ssh-keygen -t ed25519 -f ~/.ssh/id_rsa -N ""
 ```
 
-**2. Copia la chiave pubblica su ogni nodo:**
+**2. Aggiungi la chiave pubblica su ogni nodo.**
+
+Copia il contenuto di `~/.ssh/id_rsa.pub` e appendilo al file `~/.ssh/authorized_keys` dell'utente SSH su ciascun nodo. Se usi la console della VM o un sistema di provisioning (cloud-init, Proxmox, ecc.) puoi farlo in fase di creazione della macchina.
+
+**3. Verifica che la connessione funzioni** e che l'utente possa fare sudo senza password:
 
 ```bash
-ssh-copy-id -i ~/.ssh/id_rsa.pub root@<ip-nodo>
-```
-
-**3. Verifica sudo senza password** su ogni nodo:
-
-```bash
-ssh -i ~/.ssh/id_rsa root@<ip-nodo> 'sudo id'
+ssh -i ~/.ssh/id_rsa <user>@<ip-nodo> 'sudo id'
 ```
 
 **4. Imposta nel `.env`:**
 
 ```ini
-SSH_USER=root
+SSH_USER=<user>
 SSH_KEY_PATH=~/.ssh/id_rsa
 ```
 
