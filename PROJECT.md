@@ -219,15 +219,20 @@ Bug trovati e fixati:
   a target version; `changed_when` accurato su tutti gli apply
 - Output: pool MetalLB e info Longhorn aggiunti a `cluster-info.txt` e file manutenzione
 
-### Test 7 — Ingress Traefik
-**Configurazione:** cluster HA, `INGRESS_ENABLED=true`, `INGRESS_TYPE=traefik`
+### Test 7 — Ingress Traefik ✓ COMPLETATO (2026-04-20)
+**Configurazione:** cluster HA (3 CP + 3 worker), `INGRESS_ENABLED=true`, `INGRESS_TYPE=traefik`, `INGRESS_SERVICE_TYPE=auto`
 **Dipendenza:** MetalLB (Test 6) per LoadBalancer IP
-**Stato:** DA ESEGUIRE
+**Risultato:** PASS — DaemonSet 3 pod Running, LoadBalancer IP 172.30.232.78, IngressClass `traefik` registrata
 
-### Test 8 — Ingress Nginx Proxy Manager
-**Configurazione:** cluster HA, `INGRESS_ENABLED=true`, `INGRESS_TYPE=nginx-proxy-manager`
-**Dipendenza:** MetalLB (Test 6) per LoadBalancer IP
-**Stato:** DA ESEGUIRE
+Bug trovati e fixati:
+- Helm non è installato sui nodi CP (è sulla bootstrap) → tutte le task Traefik usano
+  `delegate_to: localhost` + `KUBECONFIG: /root/.kube/{{ cluster_name }}`
+
+### Test 8 — Ingress Nginx Proxy Manager ✓ COMPLETATO (2026-04-20)
+**Configurazione:** cluster HA (3 CP + 3 worker), `INGRESS_ENABLED=true`, `INGRESS_TYPE=nginx-proxy-manager`, `INGRESS_SERVICE_TYPE=auto`
+**Dipendenza:** MetalLB (Test 6) + Longhorn (Test 9) per RWX storage
+**Risultato:** PASS — DaemonSet 3 pod Running, MariaDB running, LoadBalancer IP 172.30.232.78,
+PVC npm-shared RWX 10Gi (longhorn-rwx), PVC npm-mariadb-data RWO 5Gi (longhorn)
 
 ### Test 9 — Longhorn ✓ COMPLETATO (2026-04-17)
 **Configurazione:** cluster HA (3 CP + 3 worker), `LONGHORN_ENABLED=true`, `LONGHORN_UI_NODEPORT=30080`

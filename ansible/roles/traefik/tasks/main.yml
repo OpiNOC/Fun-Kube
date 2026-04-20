@@ -1,34 +1,31 @@
 ---
+# Tutte le task Helm/kubectl vengono delegate alla bootstrap machine (localhost)
+# che ha già Helm installato e il kubeconfig del cluster in /root/.kube/{{ cluster_name }}.
+
 - name: Add Traefik Helm repository
   ansible.builtin.command: helm repo add traefik https://traefik.github.io/charts
   register: helm_repo_add
   changed_when: "'already exists' not in helm_repo_add.stderr"
   failed_when: helm_repo_add.rc != 0 and 'already exists' not in helm_repo_add.stderr
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
 
 - name: Update Helm repositories
   ansible.builtin.command: helm repo update
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
   changed_when: false
-
-- name: Check if Traefik is already installed
-  ansible.builtin.command: helm status traefik -n {{ traefik_namespace }}
-  register: traefik_status
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-  run_once: true
-  changed_when: false
-  failed_when: false
 
 - name: Template Traefik Helm values
   ansible.builtin.template:
     src: values.yaml.j2
     dest: /tmp/traefik-values.yaml
     mode: '0644'
+  delegate_to: localhost
   run_once: true
 
 - name: Install/upgrade Traefik via Helm
@@ -40,7 +37,8 @@
     --wait
     --timeout 5m0s
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
   changed_when: true
 
@@ -50,7 +48,8 @@
     -n {{ traefik_namespace }}
     --timeout=300s
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
   changed_when: false
 
@@ -59,6 +58,7 @@
     src: dashboard-ingressroute.yaml.j2
     dest: /tmp/traefik-dashboard.yaml
     mode: '0644'
+  delegate_to: localhost
   run_once: true
   when: traefik_dashboard_host | length > 0
 
@@ -66,7 +66,8 @@
   ansible.builtin.command: >
     kubectl apply -f /tmp/traefik-dashboard.yaml --validate=false
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
   changed_when: true
   when: traefik_dashboard_host | length > 0
@@ -76,6 +77,7 @@
     src: clusterissuer.yaml.j2
     dest: /tmp/traefik-clusterissuer.yaml
     mode: '0644'
+  delegate_to: localhost
   run_once: true
   when: traefik_acme_email | length > 0
 
@@ -83,7 +85,8 @@
   ansible.builtin.command: >
     kubectl apply -f /tmp/traefik-clusterissuer.yaml --validate=false
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
   changed_when: true
   when: traefik_acme_email | length > 0
@@ -91,7 +94,8 @@
 - name: Show Traefik service info
   ansible.builtin.command: kubectl get svc traefik -n {{ traefik_namespace }}
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
   changed_when: false
   ignore_errors: true
