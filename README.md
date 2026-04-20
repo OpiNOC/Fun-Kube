@@ -288,6 +288,8 @@ Fun-Kube verifica le sovrapposizioni all'avvio e blocca con un errore chiaro se 
 
 ./fun-kube reset [.env]       # distrugge il cluster (kubeadm reset su tutti i nodi)
   --yes                       # salta la conferma interattiva
+                              # Nota: agisce solo sui nodi. Sulla bootstrap machine
+                              # rimangono kubeconfig, output/ e venv (non interferiscono con un nuovo up)
 
 ./fun-kube diagnose [.env]    # stato nodi: kubelet, containerd, disco, RAM, versioni
 
