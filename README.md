@@ -20,8 +20,10 @@ cp .env.example .env
 |---|---|---|---|
 | **Local-node** | 1 (la bootstrap stessa) | 0 | Tutto gira sulla stessa macchina |
 | **Mononodo** | 1 remoto | 0 | VM singola, fa tutto |
-| **Single CP** | 1 | N | CP dedicato + worker separati |
-| **HA** | 3+ | N | Alta disponibilità con keepalived VIP |
+| **Single CP** | 1 | 1+ | CP dedicato + worker separati |
+| **HA** | 3+ | 0+ | Alta disponibilità con keepalived VIP |
+
+> **2 control-plane non è supportato.** Usa 1 (mononodo/single-cp) oppure 3+ (HA).
 
 Se non definisci worker, i nodi control-plane vengono detaintati automaticamente e schedulano anche i workload applicativi.
 
@@ -273,7 +275,17 @@ LONGHORN_RWX=true                 # abilita StorageClass ReadWriteMany (longhorn
 LONGHORN_UI_NODEPORT=31080        # 0 = UI non esposta
 ```
 
-Longhorn richiede almeno 3 nodi worker per la replica dei volumi. Su mononodo funziona ma senza ridondanza. Prerequisiti (`nfs-common`, `open-iscsi`) installati automaticamente su tutti i nodi.
+Funziona su qualsiasi numero di nodi. Il numero di repliche viene calcolato automaticamente in base ai nodi schedulabili del cluster:
+
+| Nodi schedulabili | Repliche Longhorn | Ridondanza |
+|---|---|---|
+| 1 (mononodo o CP untainted) | 1 | Nessuna — se il nodo va giù, i dati non sono accessibili |
+| 2 | 2 | Parziale — tolera la perdita di 1 nodo |
+| 3+ | 3 | Piena — tolera la perdita di 1 nodo senza interruzioni |
+
+Fun-Kube mostra un avviso durante `up` se le repliche sono inferiori a 3.
+
+Prerequisiti (`nfs-common`, `open-iscsi`) installati automaticamente su tutti i nodi.
 
 ---
 
