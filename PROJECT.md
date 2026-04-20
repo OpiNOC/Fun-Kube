@@ -52,8 +52,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun-kube (entry point)        | ✓ auto-bootstrap venv Python   |
 | fun_kube/config.py            | ✓ parsing, validazione, topologia, gap detection NODE_N |
 | fun_kube/preflight.py         | ✓ local + SSH checks           |
-| fun_kube/runner.py            | ✓ inventory, sequenza playbook, Ctrl+C; output addon (MetalLB, Longhorn) |
-| fun_kube/cli.py               | ✓ up (--yes), check-deps, reset, diagnose; riepilogo nodi + addon + conferma |
+| fun_kube/runner.py            | ✓ inventory, sequenza playbook (longhorn prima di ingress), Ctrl+C; output addon; longhorn_replicas dinamico |
+| fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP); config_warnings |
 | fun_kube/deps.py              | ✓ check + auto-install tools   |
 | ansible/roles/common          | ✓ testato                      |
 | ansible/roles/containerd      | ✓ testato (fix config v2.x)    |
@@ -416,6 +416,9 @@ Prima del provisioning viene sempre mostrato un riepilogo con:
      → metrics-server.yml → cert-manager.yml → cert-renewal.yml
      → [local-path-provisioner.yml]  (solo single-node)
      → bootstrap-kubeconfig.yml
+     → [metallb.yml]
+     → [longhorn.yml]     ← PRIMA di ingress (NPM usa SC longhorn/longhorn-rwx)
+     → [ingress.yml]      ← Traefik o Nginx Proxy Manager
 5. output          fetch admin.conf, aggiorna ~/.bashrc, cluster-info.txt
 ```
 
@@ -467,3 +470,18 @@ Ogni run può essere rieseguito senza danni:
 - containerd: rigenera config solo se diverso
 - swap: skip se già disabilitato
 - untaint: ok se taint già rimosso
+
+**Reset con volumi Longhorn montati**
+`kubeadm reset` si bloccava indefinitamente sui worker con volumi Longhorn (iSCSI/NFS) ancora montati in `/var/lib/kubelet`.
+**Fix:** il comando `reset` in `cli.py` esegue prima `systemctl stop kubelet && systemctl stop iscsid` e poi un loop `umount -f -l` su tutti i mount kubelet/longhorn/csi, prima di invocare `kubeadm reset -f`.
+
+**Repliche Longhorn dinamiche**
+La StorageClass `longhorn` e `longhorn-rwx` avevano `numberOfReplicas: "3"` hardcoded. Su cluster con meno di 3 nodi schedulabili i PVC restavano `Pending`.
+**Fix:** `ClusterConfig.longhorn_replicas = min(nodi_schedulabili, 3)` in `config.py`; passato come extra var ad Ansible; `longhorn.yml` usa `{{ longhorn_replicas }}` nella SC e patcha la SC default dopo l'installazione. `config.py` emette un warning non bloccante se repliche < 3.
+
+**Helm delegate_to: localhost**
+Helm è installato solo sulla bootstrap machine, non sui nodi CP.
+Tutte le task che usano `helm` nel role `traefik` usano `delegate_to: localhost` con `environment: KUBECONFIG: /root/.kube/{{ cluster_name }}`. Questo pattern vale per qualsiasi tool disponibile solo sulla bootstrap.
+
+**Ordine playbook: longhorn prima di ingress**
+NPM richiede le StorageClass `longhorn` (per MariaDB RWO) e `longhorn-rwx` (per storage condiviso RWX). `ingress.yml` deve quindi essere eseguito DOPO `longhorn.yml`. L'ordine in `runner.py` è: metallb → longhorn → ingress.
