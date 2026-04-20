@@ -130,6 +130,9 @@ def write_output(cluster: ClusterConfig) -> None:
             "kubectl get pods -n longhorn-system",
         ]
 
+    if cluster.ingress.enabled:
+        lines += _ingress_output_lines(cluster)
+
     lines += [
         "",
         "# Troubleshooting",
@@ -144,6 +147,9 @@ def write_output(cluster: ClusterConfig) -> None:
 
     out.write_text("\n".join(lines) + "\n")
     console.print(f"  [green]✓[/]  {out}")
+
+    if cluster.ingress.enabled:
+        _write_ingress_extra_files(cluster)
 
     _write_maintenance_file(cluster)
 
@@ -317,6 +323,9 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
             "  kubectl get storageclass",
         ]
 
+    if cluster.ingress.enabled:
+        lines += ["", ""] + _ingress_maintenance_lines(cluster)
+
     dest = Path(f"/root/{cluster.cluster_name}-manutenzione.txt")
     dest.write_text("\n".join(lines) + "\n")
     console.print(f"  [green]✓[/]  file manutenzione → {dest}")
@@ -358,6 +367,9 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
 
     if cluster.metallb.enabled:
         playbooks.append("metallb.yml")
+
+    if cluster.ingress.enabled:
+        playbooks.append("ingress.yml")
 
     if cluster.longhorn.enabled:
         playbooks.append("longhorn.yml")
@@ -493,6 +505,23 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhor
         "longhorn_ui_nodeport": cluster.longhorn.ui_nodeport,
         "longhorn_namespace": "longhorn-system",
         "longhorn_version": longhorn_version_resolved,
+        # Ingress
+        "ingress_enabled": cluster.ingress.enabled,
+        "ingress_type": cluster.ingress.type,
+        "ingress_service_type": cluster.effective_ingress_service_type,
+        "traefik_namespace": "traefik",
+        "traefik_lb_ip": cluster.ingress.traefik_lb_ip,
+        "traefik_http_nodeport": cluster.ingress.traefik_http_nodeport,
+        "traefik_https_nodeport": cluster.ingress.traefik_https_nodeport,
+        "traefik_is_default_class": cluster.ingress.traefik_is_default_class,
+        "traefik_dashboard_host": cluster.ingress.traefik_dashboard_host,
+        "traefik_acme_email": cluster.ingress.traefik_acme_email,
+        "npm_namespace": "npm-system",
+        "npm_lb_ip": cluster.ingress.npm_lb_ip,
+        "npm_http_nodeport": cluster.ingress.npm_http_nodeport,
+        "npm_https_nodeport": cluster.ingress.npm_https_nodeport,
+        "npm_admin_nodeport": cluster.ingress.npm_admin_nodeport,
+        "npm_db_password": cluster.ingress.npm_db_password,
     }
 
 
@@ -547,6 +576,319 @@ def _run_playbook(pb: Path, inventory: Path, extra_vars: dict, debug: bool) -> N
         raise RunnerError(
             f"Il playbook {pb.name} è terminato con codice {proc.returncode}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Ingress output helpers
+# ---------------------------------------------------------------------------
+
+def _ingress_urls(cluster: "ClusterConfig"):
+    """Ritorna (http_url, https_url, admin_url) per l'ingress configurato."""
+    svc = cluster.effective_ingress_service_type
+    ep = cluster.api_endpoint
+    ing = cluster.ingress
+    if ing.type == "traefik":
+        if svc == "loadbalancer":
+            ip = ing.traefik_lb_ip or "<MetalLB auto-assign — esegui: kubectl get svc -n traefik traefik>"
+            return f"http://{ip}", f"https://{ip}", None
+        else:
+            return (
+                f"http://{ep}:{ing.traefik_http_nodeport}",
+                f"https://{ep}:{ing.traefik_https_nodeport}",
+                None,
+            )
+    else:  # nginx-proxy-manager
+        if svc == "loadbalancer":
+            ip = ing.npm_lb_ip or "<MetalLB auto-assign — esegui: kubectl get svc -n npm-system nginx-proxy-manager>"
+            return f"http://{ip}", f"https://{ip}", f"http://{ip}:81"
+        else:
+            return (
+                f"http://{ep}:{ing.npm_http_nodeport}",
+                f"https://{ep}:{ing.npm_https_nodeport}",
+                f"http://{ep}:{ing.npm_admin_nodeport}",
+            )
+
+
+def _ingress_output_lines(cluster: "ClusterConfig") -> list:
+    svc = cluster.effective_ingress_service_type
+    http_url, https_url, admin_url = _ingress_urls(cluster)
+    ing = cluster.ingress
+
+    if ing.type == "traefik":
+        if ing.traefik_dashboard_host:
+            dash = f"http://{ing.traefik_dashboard_host}/dashboard/"
+        else:
+            dash = "kubectl port-forward -n traefik svc/traefik 9000:9000  →  http://localhost:9000/dashboard/"
+        lines = [
+            "",
+            "# Ingress — Traefik",
+            f"Namespace:       traefik",
+            f"Service type:    {svc}",
+            f"HTTP:            {http_url}",
+            f"HTTPS:           {https_url}",
+            f"Dashboard:       {dash}",
+            f"IngressClass:    traefik (default: {'sì' if ing.traefik_is_default_class else 'no'})",
+            "kubectl -n traefik get pods",
+            "kubectl -n traefik get svc",
+            "kubectl -n traefik logs -l app.kubernetes.io/name=traefik",
+        ]
+        if ing.traefik_acme_email:
+            lines += [
+                f"Let's Encrypt:   letsencrypt-staging + letsencrypt-prod",
+                f"Email ACME:      {ing.traefik_acme_email}",
+                "kubectl get clusterissuer",
+            ]
+        else:
+            lines += [
+                "Let's Encrypt:   non configurato",
+                "Guida setup LE:  output/traefik-letsencrypt-guide.txt",
+            ]
+    else:  # nginx-proxy-manager
+        lines = [
+            "",
+            "# Ingress — Nginx Proxy Manager",
+            f"Namespace:       npm-system",
+            f"Service type:    {svc}",
+            f"HTTP:            {http_url}",
+            f"HTTPS:           {https_url}",
+            f"Admin UI:        {admin_url}",
+            "Default login:   admin@example.com  /  changeme",
+            "IMPORTANTE: cambiare la password al primo accesso!",
+            "kubectl -n npm-system get pods",
+            "kubectl -n npm-system get svc",
+        ]
+        if ing.npm_db_password == "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW":
+            lines.append("ATTENZIONE: NPM_DB_PASSWORD è ancora il valore di default — cambiarlo in .env!")
+    return lines
+
+
+def _ingress_maintenance_lines(cluster: "ClusterConfig") -> list:
+    svc = cluster.effective_ingress_service_type
+    http_url, https_url, admin_url = _ingress_urls(cluster)
+    ing = cluster.ingress
+    ep = cluster.api_endpoint
+
+    if ing.type == "traefik":
+        if ing.traefik_dashboard_host:
+            dash = f"http://{ing.traefik_dashboard_host}/dashboard/"
+        else:
+            dash = "kubectl port-forward -n traefik svc/traefik 9000:9000  (poi http://localhost:9000/dashboard/)"
+        lines = [
+            "ADDON — Ingress (Traefik)",
+            "-" * 40,
+            "",
+            f"Namespace:    traefik",
+            f"Service type: {svc}",
+            f"HTTP:         {http_url}",
+            f"HTTPS:        {https_url}",
+            f"Dashboard:    {dash}",
+            f"IngressClass: traefik (isDefaultClass: {ing.traefik_is_default_class})",
+            "",
+            "Verifica:",
+            "  kubectl -n traefik get pods -o wide",
+            "  kubectl -n traefik get svc",
+            "  kubectl -n traefik logs -l app.kubernetes.io/name=traefik --tail=50",
+            "  kubectl get ingressclass",
+        ]
+        if ing.traefik_acme_email:
+            lines += [
+                "",
+                "Let's Encrypt:",
+                f"  Email:        {ing.traefik_acme_email}",
+                "  ClusterIssuer: letsencrypt-staging, letsencrypt-prod",
+                "  kubectl get clusterissuer",
+                "  kubectl get certificate -A",
+            ]
+        else:
+            lines += [
+                "",
+                "Let's Encrypt: NON configurato automaticamente.",
+                "  Guida post-install: output/traefik-letsencrypt-guide.txt",
+            ]
+        lines += [
+            "",
+            "Esempio Ingress TLS (richiede ClusterIssuer letsencrypt-prod):",
+            "  apiVersion: networking.k8s.io/v1",
+            "  kind: Ingress",
+            "  metadata:",
+            "    annotations:",
+            "      cert-manager.io/cluster-issuer: letsencrypt-prod",
+            "  spec:",
+            "    ingressClassName: traefik",
+            "    tls:",
+            "    - hosts: [mioapp.miodominio.com]",
+            "      secretName: mioapp-tls",
+            "    rules:",
+            "    - host: mioapp.miodominio.com",
+        ]
+    else:  # nginx-proxy-manager
+        storage = "local-path (RWO)" if cluster.topology == "single-node" else "longhorn / longhorn-rwx"
+        lines = [
+            "ADDON — Ingress (Nginx Proxy Manager)",
+            "-" * 40,
+            "",
+            f"Namespace:    npm-system",
+            f"Service type: {svc}",
+            f"HTTP:         {http_url}",
+            f"HTTPS:        {https_url}",
+            f"Admin UI:     {admin_url}",
+            f"Storage:      {storage}",
+            "",
+            "Accesso admin UI:",
+            "  URL:      " + admin_url,
+            "  Login:    admin@example.com  /  changeme  (cambiare subito!)",
+            "",
+            "Verifica:",
+            "  kubectl -n npm-system get pods -o wide",
+            "  kubectl -n npm-system get svc",
+            "  kubectl -n npm-system get pvc",
+            "  kubectl -n npm-system logs -l app=nginx-proxy-manager --tail=50",
+        ]
+        if ing.npm_db_password == "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW":
+            lines += [
+                "",
+                "ATTENZIONE: NPM_DB_PASSWORD è il valore di default.",
+                "  Aggiornare NPM_DB_PASSWORD in .env e rieseguire fun-kube up.",
+            ]
+    return lines
+
+
+def _write_ingress_extra_files(cluster: "ClusterConfig") -> None:
+    """Scrive file aggiuntivi in output/ per l'ingress (guide LE, template)."""
+    if cluster.ingress.type != "traefik" or cluster.ingress.traefik_acme_email:
+        return
+
+    ep = cluster.api_endpoint
+    ing = cluster.ingress
+    svc = cluster.effective_ingress_service_type
+    if svc == "loadbalancer":
+        lb_ref = ing.traefik_lb_ip or "<TRAEFIK-LB-IP>"
+    else:
+        lb_ref = f"{ep}:{ing.traefik_http_nodeport}"
+
+    guide = cluster.output_dir / "traefik-letsencrypt-guide.txt"
+    lines = [
+        "Traefik — Guida configurazione Let's Encrypt",
+        "=" * 60,
+        "",
+        "Questa guida spiega come configurare TLS automatico con cert-manager",
+        "e Let's Encrypt dopo aver installato Traefik senza TRAEFIK_ACME_EMAIL.",
+        "",
+        "PREREQUISITI",
+        "-" * 40,
+        "  - DNS pubblico che risolve verso l'IP di Traefik",
+        f"  - Porta 80 aperta verso {lb_ref} (necessaria per HTTP-01 challenge)",
+        "  - cert-manager installato (già incluso da fun-kube)",
+        "",
+        "STEP 1 — Crea i ClusterIssuer",
+        "-" * 40,
+        "",
+        "Salva il seguente YAML in clusterissuer.yaml e applica con:",
+        "  kubectl apply -f clusterissuer.yaml",
+        "",
+        "---",
+        "apiVersion: cert-manager.io/v1",
+        "kind: ClusterIssuer",
+        "metadata:",
+        "  name: letsencrypt-staging",
+        "spec:",
+        "  acme:",
+        "    email: TUA-EMAIL@DOMINIO.TLD",
+        "    server: https://acme-staging-v02.api.letsencrypt.org/directory",
+        "    privateKeySecretRef:",
+        "      name: letsencrypt-staging-account-key",
+        "    solvers:",
+        "    - http01:",
+        "        ingress:",
+        "          ingressClassName: traefik",
+        "---",
+        "apiVersion: cert-manager.io/v1",
+        "kind: ClusterIssuer",
+        "metadata:",
+        "  name: letsencrypt-prod",
+        "spec:",
+        "  acme:",
+        "    email: TUA-EMAIL@DOMINIO.TLD",
+        "    server: https://acme-v02.api.letsencrypt.org/directory",
+        "    privateKeySecretRef:",
+        "      name: letsencrypt-prod-account-key",
+        "    solvers:",
+        "    - http01:",
+        "        ingress:",
+        "          ingressClassName: traefik",
+        "",
+        "STEP 2 — Verifica ClusterIssuer",
+        "-" * 40,
+        "  kubectl get clusterissuer",
+        "  kubectl describe clusterissuer letsencrypt-prod",
+        "",
+        "STEP 3 — Crea un Ingress con TLS",
+        "-" * 40,
+        "",
+        "Salva il seguente YAML in ingress-mioapp.yaml e applica:",
+        "  kubectl apply -f ingress-mioapp.yaml",
+        "",
+        "apiVersion: networking.k8s.io/v1",
+        "kind: Ingress",
+        "metadata:",
+        "  name: mioapp",
+        "  namespace: MIONAMESPACE",
+        "  annotations:",
+        "    cert-manager.io/cluster-issuer: letsencrypt-prod",
+        "    acme.cert-manager.io/http01-edit-in-place: \"true\"",
+        "spec:",
+        "  ingressClassName: traefik",
+        "  tls:",
+        "  - hosts:",
+        "    - mioapp.miodominio.com",
+        "    secretName: mioapp-tls",
+        "  rules:",
+        "  - host: mioapp.miodominio.com",
+        "    http:",
+        "      paths:",
+        "      - path: /",
+        "        pathType: Prefix",
+        "        backend:",
+        "          service:",
+        "            name: MIOSERVIZIO",
+        "            port:",
+        "              number: 80",
+        "",
+        "STEP 4 — Verifica certificato",
+        "-" * 40,
+        "  kubectl -n MIONAMESPACE get certificate",
+        "  kubectl -n MIONAMESPACE describe certificate mioapp-tls",
+        "  kubectl -n MIONAMESPACE get order,challenge",
+        "",
+        "  Quando READY=True il certificato è valido.",
+        "",
+        "TROUBLESHOOTING",
+        "-" * 40,
+        "  # Traefik",
+        "  kubectl -n traefik get pods",
+        "  kubectl -n traefik logs -l app.kubernetes.io/name=traefik",
+        "  kubectl -n traefik get svc",
+        "",
+        "  # cert-manager",
+        "  kubectl -n cert-manager get pods",
+        "  kubectl -n cert-manager logs deploy/cert-manager",
+        "",
+        "  # Challenge HTTP-01 in corso",
+        "  kubectl get challenge -A",
+        "  kubectl describe challenge -A",
+        "",
+        "  # Test raggiungibilità porta 80",
+        f"  curl -I http://mioapp.miodominio.com",
+        "",
+        "NOTE",
+        "-" * 40,
+        "  - Usare letsencrypt-staging per i test (nessun rate limit).",
+        "  - Passare a letsencrypt-prod solo quando il setup funziona.",
+        "  - Se c'è hairpin NAT, aggiungere DNS interno che risolve",
+        "    il dominio direttamente verso l'IP di Traefik.",
+    ]
+    guide.write_text("\n".join(lines) + "\n")
+    console.print(f"  [green]✓[/]  guida Let's Encrypt → {guide}")
 
 
 # ---------------------------------------------------------------------------

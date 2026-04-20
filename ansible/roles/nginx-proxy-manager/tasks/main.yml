@@ -1,80 +1,78 @@
-# tasks file for nginx-proxy-manager
 ---
-- name: Create NPM namespace
-  ansible.builtin.command: kubectl create namespace {{ npm_namespace }}
+# Su cluster multi-nodo NPM usa longhorn-rwx per la condivisione dati tra pod DaemonSet.
+# Creiamo la SC se non esiste già (il role longhorn la crea solo se LONGHORN_RWX=true).
+- name: Check if longhorn-rwx StorageClass exists
+  ansible.builtin.command: kubectl get storageclass longhorn-rwx
+  register: lhrwx_check
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
-  delegate_to: "{{ first_cp_hostname }}"
   run_once: true
-  changed_when: true
-  ignore_errors: true
+  changed_when: false
+  failed_when: false
+  when: topology != "single-node"
 
-- name: Deploy Nginx Proxy Manager
+- name: Create longhorn-rwx StorageClass
   ansible.builtin.shell: |
-    cat <<EOF | kubectl apply -n {{ npm_namespace }} -f -
-    apiVersion: v1
-    kind: PersistentVolumeClaim
+    kubectl apply --validate=false -f - <<'EOF'
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
     metadata:
-      name: npm-data
-    spec:
-      accessModes:
-        - ReadWriteOnce
-      resources:
-        requests:
-          storage: 1Gi
-    ---
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: nginx-proxy-manager
-    spec:
-      replicas: 1
-      selector:
-        matchLabels:
-          app: nginx-proxy-manager
-      template:
-        metadata:
-          labels:
-            app: nginx-proxy-manager
-        spec:
-          containers:
-            - name: nginx-proxy-manager
-              image: jc21/nginx-proxy-manager:latest
-              ports:
-                - containerPort: 80
-                - containerPort: 443
-                - containerPort: {{ npm_admin_port }}
-              volumeMounts:
-                - name: data
-                  mountPath: /data
-          volumes:
-            - name: data
-              persistentVolumeClaim:
-                claimName: npm-data
-    ---
-    apiVersion: v1
-    kind: Service
-    metadata:
-      name: nginx-proxy-manager
-    spec:
-      type: LoadBalancer
-      selector:
-        app: nginx-proxy-manager
-      ports:
-        - name: http
-          port: 80
-          targetPort: 80
-        - name: https
-          port: 443
-          targetPort: 443
-        - name: admin
-          port: {{ npm_admin_port }}
-          targetPort: {{ npm_admin_port }}
+      name: longhorn-rwx
+    provisioner: driver.longhorn.io
+    allowVolumeExpansion: true
+    reclaimPolicy: Delete
+    volumeBindingMode: Immediate
+    parameters:
+      numberOfReplicas: "3"
+      staleReplicaTimeout: "20"
+      fsType: ext4
     EOF
   args:
     executable: /bin/bash
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
-  delegate_to: "{{ first_cp_hostname }}"
   run_once: true
   changed_when: true
+  when: topology != "single-node" and lhrwx_check.rc != 0
+
+- name: Template NPM manifest
+  ansible.builtin.template:
+    src: npm-stack.yaml.j2
+    dest: /tmp/npm-stack.yaml
+    mode: '0644'
+  run_once: true
+
+- name: Apply NPM stack
+  ansible.builtin.command: kubectl apply -f /tmp/npm-stack.yaml --validate=false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  run_once: true
+  changed_when: true
+
+- name: Wait for MariaDB rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/npm-mariadb
+    -n {{ npm_namespace }}
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  run_once: true
+  changed_when: false
+
+- name: Wait for NPM DaemonSet rollout
+  ansible.builtin.command: >
+    kubectl rollout status daemonset/nginx-proxy-manager
+    -n {{ npm_namespace }}
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  run_once: true
+  changed_when: false
+
+- name: Show NPM service info
+  ansible.builtin.command: kubectl get svc nginx-proxy-manager -n {{ npm_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  run_once: true
+  changed_when: false
+  ignore_errors: true

@@ -1,0 +1,50 @@
+deployment:
+  enabled: true
+  kind: DaemonSet
+
+ingressClass:
+  enabled: true
+  isDefaultClass: {{ traefik_is_default_class | bool | lower }}
+  name: traefik
+
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: true
+
+service:
+  enabled: true
+  type: {{ "LoadBalancer" if ingress_service_type == "loadbalancer" else "NodePort" }}
+{% if ingress_service_type == "loadbalancer" %}
+  spec:
+{% if traefik_lb_ip %}
+    loadBalancerIP: "{{ traefik_lb_ip }}"
+{% endif %}
+    externalTrafficPolicy: Local
+{% endif %}
+
+ports:
+  web:
+    port: 8000
+    expose:
+      default: true
+    exposedPort: 80
+{% if ingress_service_type == "nodeport" %}
+    nodePort: {{ traefik_http_nodeport }}
+{% endif %}
+  websecure:
+    port: 8443
+    expose:
+      default: true
+    exposedPort: 443
+{% if ingress_service_type == "nodeport" %}
+    nodePort: {{ traefik_https_nodeport }}
+{% endif %}
+
+api:
+  dashboard: true
+
+ingressRoute:
+  dashboard:
+    enabled: false

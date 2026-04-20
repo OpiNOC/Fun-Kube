@@ -1,4 +1,9 @@
-# defaults file for traefik
 ---
-traefik_version: latest
 traefik_namespace: traefik
+traefik_lb_ip: ""
+traefik_http_nodeport: 30080
+traefik_https_nodeport: 30443
+traefik_is_default_class: true
+traefik_dashboard_host: ""
+traefik_acme_email: ""
+ingress_service_type: nodeport

@@ -1,4 +1,8 @@
-# defaults file for nginx-proxy-manager
 ---
-npm_namespace: npm
-npm_admin_port: 81
+npm_namespace: npm-system
+npm_lb_ip: ""
+npm_http_nodeport: 30080
+npm_https_nodeport: 30443
+npm_admin_nodeport: 30081
+npm_db_password: "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW"
+ingress_service_type: nodeport

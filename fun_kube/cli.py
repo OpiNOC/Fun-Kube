@@ -313,6 +313,35 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
             mlb_ver = cluster.metallb.version or "latest (GitHub API)"
             console.print(f"    MetalLB versione  : {mlb_ver}")
             console.print(f"    MetalLB IP pool   : {cluster.metallb.ip_pool}")
+        if cluster.ingress.enabled:
+            ing = cluster.ingress
+            svc = cluster.effective_ingress_service_type
+            ep = cluster.api_endpoint
+            if ing.type == "traefik":
+                if svc == "loadbalancer":
+                    svc_detail = f"loadbalancer (IP: {ing.traefik_lb_ip or 'MetalLB auto-assign'})"
+                else:
+                    svc_detail = f"nodeport (http:{ing.traefik_http_nodeport} https:{ing.traefik_https_nodeport})"
+                console.print(f"    Ingress type      : traefik")
+                console.print(f"    Ingress service   : {svc_detail}")
+                if ing.traefik_dashboard_host:
+                    console.print(f"    Dashboard         : http://{ing.traefik_dashboard_host}/dashboard/")
+                if ing.traefik_acme_email:
+                    console.print(f"    Let's Encrypt     : {ing.traefik_acme_email}")
+                else:
+                    console.print(f"    Let's Encrypt     : [yellow]non configurato (guida in output/)[/]")
+            else:  # nginx-proxy-manager
+                if svc == "loadbalancer":
+                    svc_detail = f"loadbalancer (IP: {ing.npm_lb_ip or 'MetalLB auto-assign'})"
+                    admin_url = f"http://{ing.npm_lb_ip or '<lb-ip>'}:81"
+                else:
+                    svc_detail = f"nodeport (http:{ing.npm_http_nodeport} https:{ing.npm_https_nodeport} admin:{ing.npm_admin_nodeport})"
+                    admin_url = f"http://{ep}:{ing.npm_admin_nodeport}"
+                console.print(f"    Ingress type      : nginx-proxy-manager")
+                console.print(f"    Ingress service   : {svc_detail}")
+                console.print(f"    Admin UI          : {admin_url}")
+                if ing.npm_db_password == "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW":
+                    console.print(f"    [yellow]⚠  NPM_DB_PASSWORD è il valore di default — cambiarlo in .env![/]")
         if cluster.longhorn.enabled:
             lh_ver = cluster.longhorn.version or "latest (GitHub API)"
             lh_rwx = "sì" if cluster.longhorn.rwx else "no"

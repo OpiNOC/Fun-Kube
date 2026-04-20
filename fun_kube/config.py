@@ -42,6 +42,20 @@ class MetalLBConfig:
 class IngressConfig:
     enabled: bool
     type: Literal["traefik", "nginx-proxy-manager"]
+    service_type: Literal["auto", "loadbalancer", "nodeport"]
+    # Traefik
+    traefik_lb_ip: str
+    traefik_http_nodeport: int
+    traefik_https_nodeport: int
+    traefik_is_default_class: bool
+    traefik_dashboard_host: str
+    traefik_acme_email: str
+    # NPM
+    npm_lb_ip: str
+    npm_http_nodeport: int
+    npm_https_nodeport: int
+    npm_admin_nodeport: int
+    npm_db_password: str
 
 
 @dataclass
@@ -102,6 +116,13 @@ class ClusterConfig:
             return self.keepalived.vip
         return self.first_cp.ip
 
+    @property
+    def effective_ingress_service_type(self) -> str:
+        """Risolve 'auto' in base a MetalLB. Ritorna 'loadbalancer' o 'nodeport'."""
+        if self.ingress.service_type == "auto":
+            return "loadbalancer" if self.metallb.enabled else "nodeport"
+        return self.ingress.service_type
+
 
 # ---------------------------------------------------------------------------
 # Entry point pubblico
@@ -151,7 +172,7 @@ def load(env_file: Path) -> ClusterConfig:
         longhorn=LonghornConfig(
             enabled=_bool(env, "LONGHORN_ENABLED"),
             rwx=_bool(env, "LONGHORN_RWX"),
-            ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "30080") or "30080"),
+            ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "31080") or "31080"),
             version=env.get("LONGHORN_VERSION", "").strip(),
         ),
         topology=topology,
@@ -264,12 +285,32 @@ def _parse_extra_sans(env: dict) -> List[str]:
 
 def _parse_ingress(env: dict) -> IngressConfig:
     enabled = _bool(env, "INGRESS_ENABLED")
-    ingress_type = env.get("INGRESS_TYPE", "traefik").strip().lower()
+    ingress_type = env.get("INGRESS_TYPE", "nginx-proxy-manager").strip().lower()
     if ingress_type not in ("traefik", "nginx-proxy-manager"):
         raise ConfigError(
             f"INGRESS_TYPE deve essere 'traefik' o 'nginx-proxy-manager', trovato: '{ingress_type}'"
         )
-    return IngressConfig(enabled=enabled, type=ingress_type)
+    service_type = env.get("INGRESS_SERVICE_TYPE", "auto").strip().lower()
+    if service_type not in ("auto", "loadbalancer", "nodeport"):
+        raise ConfigError(
+            f"INGRESS_SERVICE_TYPE deve essere 'auto', 'loadbalancer' o 'nodeport', trovato: '{service_type}'"
+        )
+    return IngressConfig(
+        enabled=enabled,
+        type=ingress_type,
+        service_type=service_type,
+        traefik_lb_ip=env.get("TRAEFIK_LB_IP", "").strip(),
+        traefik_http_nodeport=int(env.get("TRAEFIK_HTTP_NODEPORT", "30080") or "30080"),
+        traefik_https_nodeport=int(env.get("TRAEFIK_HTTPS_NODEPORT", "30443") or "30443"),
+        traefik_is_default_class=_bool(env, "TRAEFIK_IS_DEFAULT_CLASS", default=True),
+        traefik_dashboard_host=env.get("TRAEFIK_DASHBOARD_HOST", "").strip(),
+        traefik_acme_email=env.get("TRAEFIK_ACME_EMAIL", "").strip(),
+        npm_lb_ip=env.get("NPM_LB_IP", "").strip(),
+        npm_http_nodeport=int(env.get("NPM_HTTP_NODEPORT", "30080") or "30080"),
+        npm_https_nodeport=int(env.get("NPM_HTTPS_NODEPORT", "30443") or "30443"),
+        npm_admin_nodeport=int(env.get("NPM_ADMIN_NODEPORT", "30081") or "30081"),
+        npm_db_password=env.get("NPM_DB_PASSWORD", "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW").strip(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +348,21 @@ def _validate(cfg: ClusterConfig) -> None:
     # MetalLB IP pool obbligatorio se abilitato
     if cfg.metallb.enabled and not cfg.metallb.ip_pool:
         errors.append("METALLB_IP_POOL è obbligatorio se METALLB_ENABLED=true.")
+
+    # Ingress
+    if cfg.ingress.enabled:
+        if cfg.effective_ingress_service_type == "loadbalancer" and not cfg.metallb.enabled:
+            errors.append(
+                "INGRESS_SERVICE_TYPE=loadbalancer (o auto) richiede METALLB_ENABLED=true.\n"
+                "  Alternativa: imposta INGRESS_SERVICE_TYPE=nodeport."
+            )
+        if (cfg.ingress.type == "nginx-proxy-manager"
+                and cfg.topology != "single-node"
+                and not cfg.longhorn.enabled):
+            errors.append(
+                "Nginx Proxy Manager su cluster multi-nodo richiede LONGHORN_ENABLED=true\n"
+                "  (storage RWX condiviso tra i pod DaemonSet)."
+            )
 
     # Controlli CIDR
     try:

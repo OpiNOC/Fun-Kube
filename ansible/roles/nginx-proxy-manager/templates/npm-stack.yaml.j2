@@ -1,0 +1,222 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ npm_namespace }}
+---
+###
+### PVC MariaDB — RWO (1 replica, tutti i topology)
+###
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: npm-mariadb-data
+  namespace: {{ npm_namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ "local-path" if topology == "single-node" else "longhorn" }}
+  resources:
+    requests:
+      storage: 5Gi
+---
+###
+### PVC NPM — RWO su single-node, RWX su multi-node (condiviso tra pod DaemonSet)
+###
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: npm-shared
+  namespace: {{ npm_namespace }}
+spec:
+  accessModes:
+{% if topology == "single-node" %}
+    - ReadWriteOnce
+  storageClassName: local-path
+{% else %}
+    - ReadWriteMany
+  storageClassName: longhorn-rwx
+{% endif %}
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: npm-db
+  namespace: {{ npm_namespace }}
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: "{{ npm_db_password }}"
+  MYSQL_DATABASE: npm
+  MYSQL_USER: npm
+  MYSQL_PASSWORD: "{{ npm_db_password }}"
+---
+###
+### MariaDB — Deployment a singola replica (nessun clustering DB)
+###
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: npm-mariadb
+  namespace: {{ npm_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: npm-mariadb
+  template:
+    metadata:
+      labels:
+        app: npm-mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.6
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: npm-db
+              key: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: npm-db
+              key: MYSQL_DATABASE
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: npm-db
+              key: MYSQL_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: npm-db
+              key: MYSQL_PASSWORD
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: npm-mariadb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: npm-mariadb
+  namespace: {{ npm_namespace }}
+spec:
+  selector:
+    app: npm-mariadb
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+###
+### NPM — DaemonSet: 1 pod per nodo, storage condiviso via subPath
+###
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nginx-proxy-manager
+  namespace: {{ npm_namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: nginx-proxy-manager
+  template:
+    metadata:
+      labels:
+        app: nginx-proxy-manager
+    spec:
+      initContainers:
+      - name: prepare-folders
+        image: busybox
+        command: ['sh', '-c', 'mkdir -p /mnt/npm/data /mnt/npm/letsencrypt']
+        volumeMounts:
+        - name: npm-storage
+          mountPath: /mnt/npm
+      containers:
+      - name: npm
+        image: jc21/nginx-proxy-manager:latest
+        env:
+        - name: DB_MYSQL_HOST
+          value: npm-mariadb
+        - name: DB_MYSQL_PORT
+          value: "3306"
+        - name: DB_MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: npm-db
+              key: MYSQL_USER
+        - name: DB_MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: npm-db
+              key: MYSQL_PASSWORD
+        - name: DB_MYSQL_NAME
+          valueFrom:
+            secretKeyRef:
+              name: npm-db
+              key: MYSQL_DATABASE
+        volumeMounts:
+        - name: npm-storage
+          mountPath: /data
+          subPath: data
+        - name: npm-storage
+          mountPath: /etc/letsencrypt
+          subPath: letsencrypt
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 443
+          name: https
+        - containerPort: 81
+          name: admin
+      volumes:
+      - name: npm-storage
+        persistentVolumeClaim:
+          claimName: npm-shared
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-proxy-manager
+  namespace: {{ npm_namespace }}
+spec:
+{% if ingress_service_type == "loadbalancer" %}
+  type: LoadBalancer
+{% if npm_lb_ip %}
+  loadBalancerIP: "{{ npm_lb_ip }}"
+{% endif %}
+  externalTrafficPolicy: Local
+{% else %}
+  type: NodePort
+{% endif %}
+  selector:
+    app: nginx-proxy-manager
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+{% if ingress_service_type == "nodeport" %}
+    nodePort: {{ npm_http_nodeport }}
+{% endif %}
+  - name: https
+    port: 443
+    targetPort: https
+{% if ingress_service_type == "nodeport" %}
+    nodePort: {{ npm_https_nodeport }}
+{% endif %}
+  - name: admin
+    port: 81
+    targetPort: admin
+{% if ingress_service_type == "nodeport" %}
+    nodePort: {{ npm_admin_nodeport }}
+{% endif %}

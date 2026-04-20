@@ -65,8 +65,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/local-path-provisioner | ✓ testato              |
 | ansible/roles/keepalived      | ✓ testato (Test 4+5)           |
 | ansible/roles/metallb         | ✓ testato (Test 6)                   |
-| ansible/roles/traefik         | scaffolding — da completare (Test 7) |
-| ansible/roles/nginx-proxy-manager | scaffolding — da completare (Test 8) |
+| ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE (Test 7) |
+| ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node (Test 8) |
 | ansible/roles/longhorn        | ✓ testato (Test 9)                   |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
@@ -337,9 +337,26 @@ CNI=calico
 METALLB_ENABLED=false
 METALLB_IP_POOL=192.168.1.200-192.168.1.220
 INGRESS_ENABLED=false
-INGRESS_TYPE=traefik        # traefik | nginx-proxy-manager
+INGRESS_TYPE=nginx-proxy-manager  # traefik | nginx-proxy-manager
+INGRESS_SERVICE_TYPE=auto         # auto | loadbalancer | nodeport
+
+# Traefik (solo se INGRESS_TYPE=traefik)
+TRAEFIK_LB_IP=                    # vuoto = MetalLB auto-assign
+TRAEFIK_HTTP_NODEPORT=30080
+TRAEFIK_HTTPS_NODEPORT=30443
+TRAEFIK_IS_DEFAULT_CLASS=true
+TRAEFIK_DASHBOARD_HOST=           # vuoto = solo port-forward
+TRAEFIK_ACME_EMAIL=               # vuoto = guida in output/
+
+# Nginx Proxy Manager (solo se INGRESS_TYPE=nginx-proxy-manager)
+NPM_LB_IP=                        # vuoto = MetalLB auto-assign
+NPM_HTTP_NODEPORT=30080
+NPM_HTTPS_NODEPORT=30443
+NPM_ADMIN_NODEPORT=30081
+NPM_DB_PASSWORD=T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW
 LONGHORN_ENABLED=false
 LONGHORN_RWX=false
+LONGHORN_UI_NODEPORT=31080        # (era 30080 — cambiato per non collidere con ingress)
 
 # HA only
 KEEPALIVED_ENABLED=false
