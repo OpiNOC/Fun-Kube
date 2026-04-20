@@ -81,18 +81,18 @@ ssh-keygen -t ed25519 -f ~/.ssh/id_rsa -N ""
 
 **2. Aggiungi la chiave pubblica su ogni nodo.**
 
-Copia il contenuto di `~/.ssh/id_rsa.pub` e appendilo al file `~/.ssh/authorized_keys` dell'utente SSH su ciascun nodo. Se usi la console della VM o un sistema di provisioning (cloud-init, Proxmox, ecc.) puoi farlo in fase di creazione della macchina.
+Copia il contenuto di `~/.ssh/id_rsa.pub` e appendilo a `/root/.ssh/authorized_keys` su ciascun nodo. Puoi farlo in fase di creazione della VM tramite console (Proxmox, ecc.), cloud-init, o qualsiasi sistema di provisioning — senza bisogno di accesso root interattivo.
 
-**3. Verifica che la connessione funzioni** e che l'utente possa fare sudo senza password:
+**3. Verifica che la connessione funzioni:**
 
 ```bash
-ssh -i ~/.ssh/id_rsa <user>@<ip-nodo> 'sudo id'
+ssh -i ~/.ssh/id_rsa root@<ip-nodo> 'id'
 ```
 
 **4. Imposta nel `.env`:**
 
 ```ini
-SSH_USER=<user>
+SSH_USER=root
 SSH_KEY_PATH=~/.ssh/id_rsa
 ```
 
