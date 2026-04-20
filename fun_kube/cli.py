@@ -198,12 +198,12 @@ def diagnose(
     env_file: Path = typer.Argument(Path(".env")),
     debug: bool = typer.Option(False, "--debug"),
 ) -> None:
-    """Raccoglie info diagnostiche da tutti i nodi del cluster."""
-    from rich.table import Table
+    """Raccoglie info diagnostiche da tutti i nodi e stato degli addon."""
     import subprocess as sp
+    import os
 
     console.print(Panel(
-        "[bold cyan]Fun-Kube Diagnose[/] — Stato nodi",
+        "[bold cyan]Fun-Kube Diagnose[/] — Stato nodi e addon",
         expand=False,
     ))
 
@@ -213,24 +213,39 @@ def diagnose(
         err.print(f"\n[red]Errore di configurazione:[/]\n{e}")
         raise typer.Exit(1)
 
+    kubeconfig = Path(f"/root/.kube/{cluster.cluster_name}")
+    kube_env = {**os.environ, "KUBECONFIG": str(kubeconfig)} if kubeconfig.exists() else None
+
+    # Stato k8s dei nodi: una sola chiamata kubectl dalla bootstrap (evita il problema
+    # dei worker senza kubeconfig)
+    node_statuses = _get_node_statuses(kube_env)
+
     checks = [
-        ("kubelet",     "systemctl is-active kubelet 2>/dev/null || echo inactive"),
-        ("containerd",  "systemctl is-active containerd 2>/dev/null || echo inactive"),
-        ("k8s node",    "kubectl get node $(hostname) --no-headers 2>/dev/null | awk '{print $2}' || echo n/a"),
-        ("disk free",   "df -h / | awk 'NR==2{print $4\" free\"}'"),
-        ("RAM free",    "free -h | awk '/^Mem/{print $7\" free\"}'"),
-        ("load avg",    "cut -d' ' -f1-3 /proc/loadavg"),
-        ("k8s version", "kubelet --version 2>/dev/null || echo n/a"),
+        ("kubelet",    "systemctl is-active kubelet 2>/dev/null || echo inactive"),
+        ("containerd", "systemctl is-active containerd 2>/dev/null || echo inactive"),
+        ("disk",       "df -h / | awk 'NR==2{print $4}'"),
+        ("RAM",        "free -h | awk '/^Mem/{print $7}'"),
+        ("load",       "cut -d' ' -f1-3 /proc/loadavg | tr ' ' '/'"),
+        ("k8s",        "kubelet --version 2>/dev/null | awk '{print $2}' || echo n/a"),
     ]
 
     table = Table(show_header=True, header_style="bold", box=None)
     table.add_column("Node", style="cyan")
     table.add_column("Role")
+    table.add_column("status", justify="center")
     for label, _ in checks:
         table.add_column(label, justify="center")
 
     for node in cluster.nodes:
-        row = [node.hostname, node.role]
+        k8s_st = node_statuses.get(node.hostname, "?")
+        if k8s_st == "Ready":
+            k8s_cell = "[green]Ready[/]"
+        elif k8s_st in ("NotReady", "Unknown"):
+            k8s_cell = f"[red]{k8s_st}[/]"
+        else:
+            k8s_cell = k8s_st
+
+        row = [node.hostname, node.role, k8s_cell]
         for _, cmd in checks:
             if cluster.local_node:
                 result = sp.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=10)
@@ -242,11 +257,285 @@ def diagnose(
                     f"{cluster.ssh_user}@{node.ip}", cmd,
                 ], capture_output=True, text=True, timeout=15)
             val = result.stdout.strip() or result.stderr.strip()[:30] or "?"
-            color = "green" if val in ("active", "Ready") else "red" if val in ("inactive", "NotReady") else ""
+            color = "green" if val == "active" else "red" if val == "inactive" else ""
             row.append(f"[{color}]{val}[/]" if color else val)
         table.add_row(*row)
 
     console.print(table)
+
+    if kube_env:
+        _print_addon_status(kube_env)
+
+
+# ---------------------------------------------------------------------------
+# Diagnose helpers
+# ---------------------------------------------------------------------------
+
+def _get_node_statuses(kube_env) -> dict:
+    """Ritorna {hostname: status} interrogando kubectl dalla bootstrap."""
+    import subprocess as sp
+    if not kube_env:
+        return {}
+    r = sp.run(["kubectl", "get", "nodes", "--no-headers"],
+               capture_output=True, text=True, env=kube_env, timeout=10)
+    statuses = {}
+    if r.returncode == 0:
+        for line in r.stdout.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                statuses[parts[0]] = parts[1]
+    return statuses
+
+
+def _kctl(args: list, kube_env: dict, timeout: int = 10):
+    """Esegue kubectl e ritorna (rc, stdout, stderr)."""
+    import subprocess as sp
+    r = sp.run(["kubectl"] + args, capture_output=True, text=True,
+               env=kube_env, timeout=timeout)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def _bytes_human(b: int) -> str:
+    for unit in ("B", "Ki", "Mi", "Gi", "Ti"):
+        if b < 1024:
+            return f"{b:.0f}{unit}"
+        b //= 1024
+    return f"{b:.0f}Pi"
+
+
+def _print_addon_status(kube_env: dict) -> None:
+    rc, out, _ = _kctl(["get", "ns", "--no-headers",
+                         "-o", "custom-columns=NAME:.metadata.name"], kube_env)
+    if rc != 0:
+        return
+    namespaces = set(out.splitlines())
+
+    sections = []
+    if "metallb-system" in namespaces:
+        sections.append(_metallb_section(kube_env))
+    if "traefik" in namespaces:
+        sections.append(_traefik_section(kube_env))
+    if "npm-system" in namespaces:
+        sections.append(_npm_section(kube_env))
+    if "longhorn-system" in namespaces:
+        sections.append(_longhorn_section(kube_env))
+
+    if sections:
+        console.print()
+        console.rule("[bold]Addon installati")
+        for s in sections:
+            console.print(s)
+            console.print()
+
+
+def _pod_summary(kube_env: dict, namespace: str) -> str:
+    """Ritorna 'N/T Running' per i pod di un namespace."""
+    rc, out, _ = _kctl(["get", "pods", "-n", namespace, "--no-headers"], kube_env)
+    if rc != 0 or not out:
+        return "nessun pod"
+    lines = out.splitlines()
+    total = len(lines)
+    running = sum(1 for l in lines if "Running" in l)
+    color = "green" if running == total else "yellow" if running > 0 else "red"
+    return f"[{color}]{running}/{total} Running[/]"
+
+
+def _metallb_section(kube_env: dict) -> str:
+    import ipaddress
+    lines = ["[bold]MetalLB[/]"]
+
+    # Pool e IP allocati
+    rc, out, _ = _kctl([
+        "get", "ipaddresspool", "-n", "metallb-system",
+        "-o", "jsonpath={range .items[*]}{.metadata.name}{'\\t'}{.spec.addresses[0]}{'\\n'}{end}",
+    ], kube_env)
+
+    rc2, svc_out, _ = _kctl([
+        "get", "svc", "-A", "--no-headers",
+        "-o", "custom-columns=NS:.metadata.namespace,NAME:.metadata.name,"
+              "TYPE:.spec.type,IP:.status.loadBalancer.ingress[0].ip,"
+              "PORTS:.spec.ports[*].port",
+    ], kube_env)
+
+    lb_services = []
+    lb_ips: set = set()
+    if rc2 == 0:
+        for line in svc_out.splitlines():
+            parts = line.split()
+            if len(parts) >= 4 and parts[2] == "LoadBalancer":
+                ip = parts[3] if parts[3] not in ("<none>", "<no", "") else ""
+                ports = parts[4] if len(parts) > 4 else ""
+                if ip:
+                    lb_ips.add(ip)
+                lb_services.append((parts[0], parts[1], ip or "pending", ports))
+
+    if rc == 0 and out:
+        for pool_line in out.splitlines():
+            if "\t" not in pool_line:
+                continue
+            pool_name, pool_range = pool_line.split("\t", 1)
+            if "-" in pool_range:
+                try:
+                    s, e = pool_range.split("-")
+                    total = int(ipaddress.ip_address(e.strip())) - int(ipaddress.ip_address(s.strip())) + 1
+                    alloc = len(lb_ips)
+                    free = total - alloc
+                    free_color = "green" if free > 0 else "red"
+                    lines.append(f"  Pool [cyan]{pool_name}[/]: {pool_range}  "
+                                 f"({total} IP — {alloc} allocati, [{free_color}]{free} liberi[/])")
+                except Exception:
+                    lines.append(f"  Pool [cyan]{pool_name}[/]: {pool_range}")
+            else:
+                lines.append(f"  Pool [cyan]{pool_name}[/]: {pool_range}")
+
+    if lb_services:
+        lines.append("  Servizi LoadBalancer:")
+        for ns, name, ip, ports in lb_services:
+            lines.append(f"    [cyan]{ns}/{name}[/]  {ip}  :{ports}")
+
+    lines.append(f"  Pods: {_pod_summary(kube_env, 'metallb-system')}")
+    return "\n".join(lines)
+
+
+def _traefik_section(kube_env: dict) -> str:
+    lines = ["[bold]Traefik[/]"]
+
+    rc, out, _ = _kctl(["get", "svc", "traefik", "-n", "traefik",
+                         "--no-headers", "-o",
+                         "custom-columns=TYPE:.spec.type,IP:.status.loadBalancer.ingress[0].ip,"
+                         "NP_HTTP:.spec.ports[?(@.name==\"web\")].nodePort,"
+                         "NP_HTTPS:.spec.ports[?(@.name==\"websecure\")].nodePort"], kube_env)
+    if rc == 0 and out:
+        parts = out.split()
+        svc_type = parts[0] if parts else "?"
+        if svc_type == "LoadBalancer":
+            ip = parts[1] if len(parts) > 1 else "pending"
+            lines.append(f"  Endpoint: [cyan]http://{ip}[/]  https://{ip}")
+        else:
+            np_http  = parts[2] if len(parts) > 2 else "?"
+            np_https = parts[3] if len(parts) > 3 else "?"
+            lines.append(f"  NodePort HTTP: [cyan]{np_http}[/]  HTTPS: {np_https}")
+
+    rc, out, _ = _kctl(["get", "ingressclass", "--no-headers",
+                         "-o", "custom-columns=NAME:.metadata.name,"
+                               "DEFAULT:.metadata.annotations.ingressclass\\.kubernetes\\.io/is-default-class"],
+                        kube_env)
+    if rc == 0 and out:
+        for line in out.splitlines():
+            parts = line.split()
+            name = parts[0] if parts else "?"
+            default = "(default)" if len(parts) > 1 and parts[1] == "true" else ""
+            lines.append(f"  IngressClass: [cyan]{name}[/] {default}")
+
+    lines.append(f"  Pods: {_pod_summary(kube_env, 'traefik')}")
+    return "\n".join(lines)
+
+
+def _npm_section(kube_env: dict) -> str:
+    lines = ["[bold]Nginx Proxy Manager[/]"]
+
+    rc, out, _ = _kctl(["get", "svc", "nginx-proxy-manager", "-n", "npm-system",
+                         "--no-headers", "-o",
+                         "custom-columns=TYPE:.spec.type,IP:.status.loadBalancer.ingress[0].ip,"
+                         "NP_HTTP:.spec.ports[?(@.name==\"http\")].nodePort,"
+                         "NP_ADMIN:.spec.ports[?(@.name==\"admin\")].nodePort"], kube_env)
+    if rc == 0 and out:
+        parts = out.split()
+        svc_type = parts[0] if parts else "?"
+        if svc_type == "LoadBalancer":
+            ip = parts[1] if len(parts) > 1 else "pending"
+            lines.append(f"  HTTP:      [cyan]http://{ip}[/]")
+            lines.append(f"  Admin UI:  [cyan]http://{ip}:81[/]")
+        else:
+            np_http  = parts[2] if len(parts) > 2 else "?"
+            np_admin = parts[3] if len(parts) > 3 else "?"
+            lines.append(f"  NodePort HTTP: [cyan]{np_http}[/]  Admin: {np_admin}")
+
+    rc, out, _ = _kctl(["get", "pvc", "-n", "npm-system", "--no-headers",
+                         "-o", "custom-columns=NAME:.metadata.name,"
+                               "STATUS:.status.phase,CAP:.status.capacity.storage,"
+                               "SC:.spec.storageClassName"], kube_env)
+    if rc == 0 and out:
+        lines.append("  PVC:")
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 4:
+                status_color = "green" if parts[1] == "Bound" else "yellow"
+                lines.append(f"    [cyan]{parts[0]}[/]  [{status_color}]{parts[1]}[/]  {parts[2]}  ({parts[3]})")
+
+    lines.append(f"  Pods: {_pod_summary(kube_env, 'npm-system')}")
+    return "\n".join(lines)
+
+
+def _longhorn_section(kube_env: dict) -> str:
+    import json as _json
+    lines = ["[bold]Longhorn[/]"]
+
+    # StorageClass
+    rc, out, _ = _kctl(["get", "storageclass", "--no-headers",
+                         "-o", "custom-columns=NAME:.metadata.name,"
+                               "PROVISIONER:.provisioner,"
+                               "DEFAULT:.metadata.annotations.storageclass\\.kubernetes\\.io/is-default-class"],
+                        kube_env)
+    if rc == 0 and out:
+        lh_classes = [l for l in out.splitlines() if "longhorn" in l.lower()]
+        if lh_classes:
+            lines.append("  StorageClass:")
+            for line in lh_classes:
+                parts = line.split()
+                name = parts[0] if parts else "?"
+                default = " [dim](default)[/]" if len(parts) > 2 and parts[2] == "true" else ""
+                lines.append(f"    [cyan]{name}[/]{default}")
+
+    # PVC aggregate
+    rc, out, _ = _kctl(["get", "pvc", "-A", "--no-headers",
+                         "-o", "custom-columns=SC:.spec.storageClassName,CAP:.status.capacity.storage,STATUS:.status.phase"],
+                        kube_env)
+    if rc == 0 and out:
+        lh_pvcs = [l for l in out.splitlines() if l.startswith("longhorn")]
+        if lh_pvcs:
+            total_gi = 0
+            bound = 0
+            for line in lh_pvcs:
+                parts = line.split()
+                if len(parts) >= 3 and parts[2] == "Bound":
+                    bound += 1
+                    cap = parts[1]
+                    try:
+                        if cap.endswith("Gi"):
+                            total_gi += int(cap[:-2])
+                        elif cap.endswith("Mi"):
+                            total_gi += int(cap[:-2]) // 1024
+                    except Exception:
+                        pass
+            lines.append(f"  Volumi: {bound} PVC bound ({total_gi}Gi allocati)")
+
+    # Nodi storage via CRD
+    rc, out, _ = _kctl(["get", "nodes.longhorn.io", "-n", "longhorn-system", "-o", "json"], kube_env, timeout=15)
+    if rc == 0 and out:
+        try:
+            data = _json.loads(out)
+            items = data.get("items", [])
+            if items:
+                lines.append("  Nodi storage:")
+                for item in items:
+                    name = item["metadata"]["name"]
+                    schedulable = item.get("spec", {}).get("allowScheduling", True)
+                    disk_statuses = item.get("status", {}).get("diskStatus", {})
+                    avail_total = sum(int(d.get("storageAvailable", 0)) for d in disk_statuses.values())
+                    max_total = sum(int(d.get("storageMaximum", 0)) for d in disk_statuses.values())
+                    sched_str = "[green]schedulable[/]" if schedulable else "[yellow]unschedulable[/]"
+                    if max_total > 0:
+                        avail_h = _bytes_human(avail_total)
+                        max_h = _bytes_human(max_total)
+                        lines.append(f"    [cyan]{name}[/]  {sched_str}  {avail_h} liberi / {max_h} totali")
+                    else:
+                        lines.append(f"    [cyan]{name}[/]  {sched_str}")
+        except Exception:
+            pass
+
+    lines.append(f"  Pods: {_pod_summary(kube_env, 'longhorn-system')}")
+    return "\n".join(lines)
 
 
 def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
