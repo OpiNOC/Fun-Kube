@@ -34,6 +34,7 @@
     --namespace {{ traefik_namespace }}
     --create-namespace
     --values /tmp/traefik-values.yaml
+    {% if traefik_chart_version | default('') | length > 0 %}--version {{ traefik_chart_version }}{% endif %}
     --wait
     --timeout 5m0s
   environment:

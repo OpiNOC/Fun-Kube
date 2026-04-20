@@ -271,7 +271,7 @@ def diagnose(
     console.print(table)
 
     if kube_env:
-        _print_addon_status(kube_env)
+        _print_addon_status(kube_env, cluster)
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ def _bytes_human(b: int) -> str:
     return f"{b:.0f}Pi"
 
 
-def _print_addon_status(kube_env: dict) -> None:
+def _print_addon_status(kube_env: dict, cluster) -> None:
     rc, out, _ = _kctl(["get", "ns", "--no-headers",
                          "-o", "custom-columns=NAME:.metadata.name"], kube_env)
     if rc != 0:
@@ -318,6 +318,8 @@ def _print_addon_status(kube_env: dict) -> None:
     namespaces = set(out.splitlines())
 
     sections = []
+    if cluster.keepalived.enabled:
+        sections.append(_keepalived_section(cluster))
     if "metallb-system" in namespaces:
         sections.append(_metallb_section(kube_env))
     if "traefik" in namespaces:
@@ -345,6 +347,31 @@ def _pod_summary(kube_env: dict, namespace: str) -> str:
     running = sum(1 for l in lines if "Running" in l)
     color = "green" if running == total else "yellow" if running > 0 else "red"
     return f"[{color}]{running}/{total} Running[/]"
+
+
+def _keepalived_section(cluster) -> str:
+    import subprocess as sp
+    lines = [f"[bold]Keepalived[/]  VIP: [cyan]{cluster.keepalived.vip}[/]  iface: {cluster.keepalived.interface}"]
+    master = None
+    for node in cluster.control_planes:
+        try:
+            cmd = f"ip addr show | grep -q '{cluster.keepalived.vip}' && echo MASTER || echo BACKUP"
+            r = sp.run(
+                ["ssh", "-i", str(cluster.ssh_key_path), "-o", "StrictHostKeyChecking=no",
+                 "-o", "ConnectTimeout=5", f"{cluster.ssh_user}@{node.ip}", cmd],
+                capture_output=True, text=True, timeout=8,
+            )
+            role = r.stdout.strip()
+            if role == "MASTER":
+                master = node.hostname
+                lines.append(f"  MASTER: [green]{node.hostname}[/] ({node.ip})")
+            else:
+                lines.append(f"  backup: {node.hostname} ({node.ip})")
+        except Exception:
+            lines.append(f"  [yellow]?[/] {node.hostname} ({node.ip})")
+    if master is None:
+        lines.append("  [red]Nessun nodo MASTER rilevato — VIP non assegnato[/]")
+    return "\n".join(lines)
 
 
 def _metallb_section(kube_env: dict) -> str:

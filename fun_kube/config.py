@@ -44,6 +44,7 @@ class IngressConfig:
     type: Literal["traefik", "nginx-proxy-manager"]
     service_type: Literal["auto", "loadbalancer", "nodeport"]
     # Traefik
+    traefik_chart_version: str
     traefik_lb_ip: str
     traefik_http_nodeport: int
     traefik_https_nodeport: int
@@ -87,6 +88,7 @@ class ClusterConfig:
     output_dir: Path
     log_level: str
     cert_manager_version: str
+    local_path_version: str
     api_server_extra_sans: List[str]
     local_node: bool
     cluster_timezone: str
@@ -179,6 +181,7 @@ def load(env_file: Path) -> ClusterConfig:
         output_dir=Path(env.get("OUTPUT_DIR", "./output")),
         log_level=env.get("LOG_LEVEL", "info").lower(),
         cert_manager_version=env.get("CERT_MANAGER_VERSION", "v1.17.2"),
+        local_path_version=env.get("LOCAL_PATH_VERSION", "").strip(),
         api_server_extra_sans=extra_sans,
         local_node=local_node,
         cluster_timezone=env.get("CLUSTER_TIMEZONE", "Europe/Rome"),
@@ -299,6 +302,7 @@ def _parse_ingress(env: dict) -> IngressConfig:
         enabled=enabled,
         type=ingress_type,
         service_type=service_type,
+        traefik_chart_version=env.get("TRAEFIK_CHART_VERSION", "").strip(),
         traefik_lb_ip=env.get("TRAEFIK_LB_IP", "").strip(),
         traefik_http_nodeport=int(env.get("TRAEFIK_HTTP_NODEPORT", "30080") or "30080"),
         traefik_https_nodeport=int(env.get("TRAEFIK_HTTPS_NODEPORT", "30443") or "30443"),

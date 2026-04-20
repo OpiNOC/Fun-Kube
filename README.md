@@ -191,6 +191,18 @@ KEEPALIVED_VIP=10.0.0.100        # IP libero sulla subnet, non assegnato ad alcu
 KEEPALIVED_INTERFACE=eth0
 ```
 
+Il `KEEPALIVED_VIP` diventa l'**endpoint del cluster**: è l'IP usato da kubeadm come `--control-plane-endpoint` e presente nel kubeconfig. In caso di failover del CP attivo, il VIP si sposta automaticamente su un altro nodo e il cluster rimane raggiungibile.
+
+```bash
+export KUBECONFIG=/root/.kube/mycluster-ha
+kubectl get nodes   # raggiungibile tramite VIP 10.0.0.100
+```
+
+Per verificare quale CP detiene il VIP in un dato momento:
+```bash
+./fun-kube diagnose   # sezione Keepalived mostra MASTER/BACKUP per ogni CP
+```
+
 ---
 
 ## Configurazione addon
@@ -296,6 +308,8 @@ Fun-Kube verifica le sovrapposizioni all'avvio e blocca con un errore chiaro se 
 ./fun-kube check-deps         # verifica tool sulla bootstrap machine
   --verbose                   # mostra le versioni
 ```
+
+Ogni sottocomando accetta `--help` per la lista completa delle opzioni.
 
 ---
 
