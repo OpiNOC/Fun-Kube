@@ -116,7 +116,7 @@ Tutto questo avviene automaticamente senza intervento manuale.
 
 ### Test 1 — Mononodo LOCAL_NODE ✓ COMPLETATO (2026-04-16)
 **Configurazione:** bootstrap=nodo, LOCAL_NODE=true, 1 CP, 0 worker
-**Macchina:** Fun-Kube-Bootstrap (172.30.232.70)
+**Macchina:** Fun-Kube-Bootstrap (10.0.0.10)
 **Risultato:** PASS — cluster ready, Calico+metrics-server+cert-manager+local-path up
 
 Bug trovati e fixati:
@@ -143,7 +143,7 @@ enable su macchina nuova (nessun record di ultima esecuzione). Lo script abbatte
 
 ### Test 2 — Mononodo con bootstrap esterna ✓ COMPLETATO (2026-04-16)
 **Configurazione:** LOCAL_NODE=false, 1 CP, 0 worker, SSH da bootstrap separata
-**Macchine:** Fun-Kube-Bootstrap (172.30.232.70) + 1 nodo separato
+**Macchine:** Fun-Kube-Bootstrap (10.0.0.10) + 1 nodo separato
 **Risultato:** PASS — cluster ready
 
 Bug trovati e fixati:
@@ -156,7 +156,7 @@ Bug trovati e fixati:
 
 ### Test 4 — HA multi CP (solo CP, senza worker) ✓ COMPLETATO (2026-04-17)
 **Configurazione:** 3 CP, keepalived VIP, nessun worker
-**Macchine:** bootstrap (.70) + 3 CP (.71-.73)
+**Macchine:** bootstrap (.10) + 3 CP (.11-.13)
 **Risultato:** PASS — cluster HA funzionante, Calico+metrics-server+cert-manager up
 
 Bug trovati e fixati (pre-test):
@@ -175,7 +175,7 @@ Da fixare: vedi sezione Note Tecniche.
 ### Test 5 — HA multi CP completo (3 CP + 3 worker) ✓ COMPLETATO (2026-04-17)
 
 **Configurazione:** 3 CP + 3 worker, keepalived VIP
-**Macchine:** bootstrap (.70) + 3 CP (.71-.73) + 3 worker (.74-.76)
+**Macchine:** bootstrap (.10) + 3 CP (.11-.13) + 3 worker (.21-.23)
 **Risultato:** PASS — cluster HA completo funzionante, tutti e 6 i nodi Ready
 
 Note:
@@ -185,7 +185,7 @@ Note:
 
 ### Test 10 — Full cluster da nodi puliti (regression) ✓ COMPLETATO (2026-04-17)
 **Configurazione:** 3 CP + 3 worker, keepalived, Longhorn
-**Macchine:** bootstrap (.70) + CP (.71-.73) + worker (.74-.76)
+**Macchine:** bootstrap (.10) + CP (.11-.13) + worker (.21-.23)
 **Risultato:** PASS dopo 2 retry (cluster operativo)
 
 Bug trovati e fixati:
@@ -204,7 +204,7 @@ Bug trovati e fixati:
 ---
 
 ### Test 6 — MetalLB ✓ COMPLETATO (2026-04-17)
-**Configurazione:** cluster HA (3 CP + 3 worker), `METALLB_ENABLED=true`, `METALLB_IP_POOL=172.30.232.78-172.30.232.79`
+**Configurazione:** cluster HA (3 CP + 3 worker), `METALLB_ENABLED=true`, `METALLB_IP_POOL=10.0.0.200-10.0.0.201`
 **Risultato:** PASS — IPAddressPool e L2Advertisement applicati, pool corretto
 
 Bug trovati e fixati:
@@ -222,7 +222,7 @@ Bug trovati e fixati:
 ### Test 7 — Ingress Traefik ✓ COMPLETATO (2026-04-20)
 **Configurazione:** cluster HA (3 CP + 3 worker), `INGRESS_ENABLED=true`, `INGRESS_TYPE=traefik`, `INGRESS_SERVICE_TYPE=auto`
 **Dipendenza:** MetalLB (Test 6) per LoadBalancer IP
-**Risultato:** PASS — DaemonSet 3 pod Running, LoadBalancer IP 172.30.232.78, IngressClass `traefik` registrata
+**Risultato:** PASS — DaemonSet 3 pod Running, LoadBalancer IP 10.0.0.200, IngressClass `traefik` registrata
 
 Bug trovati e fixati:
 - Helm non è installato sui nodi CP (è sulla bootstrap) → tutte le task Traefik usano
@@ -231,12 +231,12 @@ Bug trovati e fixati:
 ### Test 8 — Ingress Nginx Proxy Manager ✓ COMPLETATO (2026-04-20)
 **Configurazione:** cluster HA (3 CP + 3 worker), `INGRESS_ENABLED=true`, `INGRESS_TYPE=nginx-proxy-manager`, `INGRESS_SERVICE_TYPE=auto`
 **Dipendenza:** MetalLB (Test 6) + Longhorn (Test 9) per RWX storage
-**Risultato:** PASS — DaemonSet 3 pod Running, MariaDB running, LoadBalancer IP 172.30.232.78,
+**Risultato:** PASS — DaemonSet 3 pod Running, MariaDB running, LoadBalancer IP 10.0.0.200,
 PVC npm-shared RWX 10Gi (longhorn-rwx), PVC npm-mariadb-data RWO 5Gi (longhorn)
 
 ### Test 9 — Longhorn ✓ COMPLETATO (2026-04-17)
 **Configurazione:** cluster HA (3 CP + 3 worker), `LONGHORN_ENABLED=true`, `LONGHORN_UI_NODEPORT=30080`
-**Macchine:** bootstrap (.70) + 3 CP (.71-.73) + 3 worker (.74-.76)
+**Macchine:** bootstrap (.10) + 3 CP (.11-.13) + 3 worker (.21-.23)
 **Risultato:** PASS — tutti i pod Running, StorageClass longhorn (default), UI su NodePort 30080
 
 Implementazione e bug trovati/fixati:
