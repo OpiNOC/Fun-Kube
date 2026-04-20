@@ -117,6 +117,10 @@
       ansible.builtin.command: kubectl get storageclass longhorn
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
+      register: _lh_sc_check
+      retries: 12
+      delay: 10
+      until: _lh_sc_check.rc == 0
       changed_when: false
       when: longhorn_enabled | default(false) | bool
 

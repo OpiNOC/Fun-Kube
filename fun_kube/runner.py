@@ -368,11 +368,11 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
     if cluster.metallb.enabled:
         playbooks.append("metallb.yml")
 
-    if cluster.ingress.enabled:
-        playbooks.append("ingress.yml")
-
     if cluster.longhorn.enabled:
         playbooks.append("longhorn.yml")
+
+    if cluster.ingress.enabled:
+        playbooks.append("ingress.yml")
 
     return playbooks
 
