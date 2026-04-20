@@ -675,8 +675,14 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
             console.print(f"    Longhorn versione : {lh_ver}")
             console.print(f"    Longhorn RWX      : {lh_rwx}")
             console.print(f"    Longhorn UI       : {lh_ui}")
+            console.print(f"    Longhorn repliche : {cluster.longhorn_replicas}")
     else:
         console.print("  Addon        : nessuno")
+
+    if cluster.config_warnings:
+        console.print()
+        for w in cluster.config_warnings:
+            console.print(f"  [yellow]⚠  {w}[/]")
 
 
 def main() -> None:

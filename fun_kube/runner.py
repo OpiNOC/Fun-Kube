@@ -502,6 +502,7 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhor
         "metallb_version": metallb_version_resolved,
         # Longhorn
         "longhorn_enabled": cluster.longhorn.enabled,
+        "longhorn_replicas": cluster.longhorn_replicas,
         "longhorn_rwx": cluster.longhorn.rwx,
         "longhorn_ui_nodeport": cluster.longhorn.ui_nodeport,
         "longhorn_namespace": "longhorn-system",

@@ -92,6 +92,7 @@ class ClusterConfig:
     api_server_extra_sans: List[str]
     local_node: bool
     cluster_timezone: str
+    config_warnings: List[str]
 
     @property
     def control_planes(self) -> List[NodeConfig]:
@@ -117,6 +118,13 @@ class ClusterConfig:
         if self.topology == "ha":
             return self.keepalived.vip
         return self.first_cp.ip
+
+    @property
+    def longhorn_replicas(self) -> int:
+        """Numero di repliche Longhorn: min(nodi schedulabili, 3).
+        I nodi schedulabili sono i worker, o i CP se untainted (nessun worker)."""
+        schedulable = len(self.workers) if self.workers else len(self.control_planes)
+        return min(schedulable, 3)
 
     @property
     def effective_ingress_service_type(self) -> str:
@@ -185,9 +193,10 @@ def load(env_file: Path) -> ClusterConfig:
         api_server_extra_sans=extra_sans,
         local_node=local_node,
         cluster_timezone=env.get("CLUSTER_TIMEZONE", "Europe/Rome"),
+        config_warnings=[],
     )
 
-    _validate(cfg)
+    cfg.config_warnings.extend(_validate(cfg))
     return cfg
 
 
@@ -321,8 +330,10 @@ def _parse_ingress(env: dict) -> IngressConfig:
 # Validazione
 # ---------------------------------------------------------------------------
 
-def _validate(cfg: ClusterConfig) -> None:
+def _validate(cfg: ClusterConfig) -> List[str]:
+    """Ritorna lista di warning (non bloccanti). Solleva ConfigError se ci sono errori."""
     errors: List[str] = []
+    warnings: List[str] = []
 
     # local_node: solo single-node
     if cfg.local_node and cfg.topology != "single-node":
@@ -368,6 +379,13 @@ def _validate(cfg: ClusterConfig) -> None:
                 "  (storage RWX condiviso tra i pod DaemonSet)."
             )
 
+    # Longhorn: avvisa se i nodi schedulabili sono meno di 3 (ridondanza ridotta)
+    if cfg.longhorn.enabled and cfg.longhorn_replicas < 3:
+        warnings.append(
+            f"Longhorn: solo {cfg.longhorn_replicas} nodo/i schedulabile/i — "
+            f"le repliche saranno impostate a {cfg.longhorn_replicas} (nessuna ridondanza)."
+        )
+
     # Controlli CIDR
     try:
         pod_net = ipaddress.ip_network(cfg.pod_cidr, strict=False)
@@ -398,6 +416,7 @@ def _validate(cfg: ClusterConfig) -> None:
         raise ConfigError(
             "Errori di configurazione:\n" + "\n".join(f"  • {e}" for e in errors)
         )
+    return warnings
 
 
 def _expand_ip_pool(pool: str) -> List[ipaddress.IPv4Address]:

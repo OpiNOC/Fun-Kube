@@ -124,6 +124,16 @@
       changed_when: false
       when: longhorn_enabled | default(false) | bool
 
+    - name: Patch longhorn StorageClass replicas
+      ansible.builtin.command: >
+        kubectl patch storageclass longhorn
+        --type=merge
+        -p '{"parameters":{"numberOfReplicas":"{{ longhorn_replicas | default(3) }}"}}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+      when: longhorn_enabled | default(false) | bool
+
     - name: Create longhorn-rwx StorageClass
       ansible.builtin.shell: |
         kubectl apply --validate=false -f - <<'EOF'
@@ -136,7 +146,7 @@
         reclaimPolicy: Delete
         volumeBindingMode: Immediate
         parameters:
-          numberOfReplicas: "3"
+          numberOfReplicas: "{{ longhorn_replicas | default(3) }}"
           staleReplicaTimeout: "30"
           fromBackup: ""
           fsType: "ext4"
