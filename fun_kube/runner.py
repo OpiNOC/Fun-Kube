@@ -133,6 +133,9 @@ def write_output(cluster: ClusterConfig) -> None:
     if cluster.ingress.enabled:
         lines += _ingress_output_lines(cluster)
 
+    if cluster.dn_essence.enabled:
+        lines += _dn_essence_output_lines(cluster)
+
     lines += [
         "",
         "# Troubleshooting",
@@ -326,6 +329,9 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
     if cluster.ingress.enabled:
         lines += ["", ""] + _ingress_maintenance_lines(cluster)
 
+    if cluster.dn_essence.enabled:
+        lines += ["", ""] + _dn_essence_maintenance_lines(cluster)
+
     dest = Path(f"/root/{cluster.cluster_name}-manutenzione.txt")
     dest.write_text("\n".join(lines) + "\n")
     console.print(f"  [green]✓[/]  file manutenzione → {dest}")
@@ -373,6 +379,9 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
 
     if cluster.ingress.enabled:
         playbooks.append("ingress.yml")
+
+    if cluster.dn_essence.enabled:
+        playbooks.append("dn-essence.yml")
 
     return playbooks
 
@@ -525,6 +534,11 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhor
         "npm_https_nodeport": cluster.ingress.npm_https_nodeport,
         "npm_admin_nodeport": cluster.ingress.npm_admin_nodeport,
         "npm_db_password": cluster.ingress.npm_db_password,
+        # DN-essence
+        "dn_essence_enabled": cluster.dn_essence.enabled,
+        "dn_essence_ui_nodeport": cluster.dn_essence.ui_nodeport,
+        "dn_essence_version": cluster.dn_essence.version,
+        "dn_essence_namespace": "dn-essence",
     }
 
 
@@ -754,6 +768,42 @@ def _ingress_maintenance_lines(cluster: "ClusterConfig") -> list:
                 "  Aggiornare NPM_DB_PASSWORD in .env e rieseguire fun-kube up.",
             ]
     return lines
+
+
+def _dn_essence_output_lines(cluster: "ClusterConfig") -> list:
+    ep = cluster.api_endpoint
+    np = cluster.dn_essence.ui_nodeport
+    ui = f"http://{ep}:{np}" if np else "kubectl port-forward svc/dn-essence 8080:80 -n dn-essence"
+    return [
+        "",
+        "# DN-essence (DNS rewrite manager)",
+        f"Namespace:       dn-essence",
+        f"UI:              {ui}",
+        "kubectl get dnsrewrite -A",
+        "kubectl -n dn-essence get pods",
+    ]
+
+
+def _dn_essence_maintenance_lines(cluster: "ClusterConfig") -> list:
+    ep = cluster.api_endpoint
+    np = cluster.dn_essence.ui_nodeport
+    ui = f"http://{ep}:{np}" if np else "kubectl port-forward svc/dn-essence 8080:80 -n dn-essence  (poi http://localhost:8080)"
+    return [
+        "ADDON — DN-essence (DNS rewrite manager per CoreDNS)",
+        "-" * 40,
+        "",
+        f"Namespace:  dn-essence",
+        f"UI:         {ui}",
+        "",
+        "Gestisce regole DNS rewrite in CoreDNS via Custom Resources.",
+        "Utile per hairpin NAT (domini pubblici → IP interni).",
+        "",
+        "Verifica:",
+        "  kubectl -n dn-essence get pods",
+        "  kubectl -n dn-essence get svc",
+        "  kubectl get dnsrewrite -A",
+        "  kubectl describe configmap coredns -n kube-system",
+    ]
 
 
 def _write_ingress_extra_files(cluster: "ClusterConfig") -> None:

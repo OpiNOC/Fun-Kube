@@ -1,0 +1,6 @@
+service:
+  type: {{ 'NodePort' if dn_essence_ui_nodeport | int > 0 else 'ClusterIP' }}
+  port: 80
+{% if dn_essence_ui_nodeport | int > 0 %}
+  nodePort: {{ dn_essence_ui_nodeport }}
+{% endif %}

@@ -1,0 +1,37 @@
+# tasks file for dn-essence
+---
+- name: Render DN-essence Helm values
+  ansible.builtin.template:
+    src: values.yaml.j2
+    dest: /tmp/dn-essence-values.yaml
+    mode: '0644'
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+
+- name: Deploy DN-essence via Helm
+  ansible.builtin.shell: |
+    helm upgrade --install dn-essence \
+      oci://ghcr.io/opinoc/helm-charts/dn-essence \
+      --namespace {{ dn_essence_namespace }} \
+      --create-namespace \
+      {% if dn_essence_version | default('') %}--version {{ dn_essence_version }} {% endif %}\
+      -f /tmp/dn-essence-values.yaml \
+      --wait --timeout=300s
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  register: _dn_essence_deploy
+  changed_when: "'has been upgraded' in _dn_essence_deploy.stdout or 'has been installed' in _dn_essence_deploy.stdout"
+
+- name: Show DN-essence access info
+  ansible.builtin.debug:
+    msg: >-
+      DN-essence pronto. UI:
+      {% if dn_essence_ui_nodeport | int > 0 %}
+      http://{{ first_cp_ip }}:{{ dn_essence_ui_nodeport }}
+      {% else %}
+      kubectl port-forward svc/dn-essence 8080:80 -n {{ dn_essence_namespace }}
+      {% endif %}

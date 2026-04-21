@@ -1,0 +1,5 @@
+# defaults file for dn-essence
+---
+dn_essence_namespace: dn-essence
+dn_essence_version: ""
+dn_essence_ui_nodeport: 30880

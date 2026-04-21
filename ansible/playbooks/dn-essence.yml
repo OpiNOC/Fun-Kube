@@ -1,0 +1,10 @@
+# Deploy DN-essence
+---
+- name: Deploy DN-essence
+  hosts: control_plane[0]
+  become: true
+  tasks:
+    - name: Apply dn-essence role
+      ansible.builtin.include_role:
+        name: dn-essence
+      when: dn_essence_enabled | default(true) | bool

@@ -67,6 +67,13 @@ class LonghornConfig:
     version: str
 
 
+@dataclass
+class DnEssenceConfig:
+    enabled: bool
+    ui_nodeport: int  # 0 = ClusterIP only, altrimenti NodePort (default 30880)
+    version: str      # vuoto = ultima versione dal registry OCI
+
+
 Topology = Literal["single-node", "single-cp", "ha"]
 
 
@@ -84,6 +91,7 @@ class ClusterConfig:
     metallb: MetalLBConfig
     ingress: IngressConfig
     longhorn: LonghornConfig
+    dn_essence: DnEssenceConfig
     topology: Topology
     output_dir: Path
     log_level: str
@@ -184,6 +192,11 @@ def load(env_file: Path) -> ClusterConfig:
             rwx=_bool(env, "LONGHORN_RWX"),
             ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "31080") or "31080"),
             version=env.get("LONGHORN_VERSION", "").strip(),
+        ),
+        dn_essence=DnEssenceConfig(
+            enabled=_bool(env, "DN_ESSENCE_ENABLED", default=True),
+            ui_nodeport=int(env.get("DN_ESSENCE_UI_NODEPORT", "30880") or "30880"),
+            version=env.get("DN_ESSENCE_VERSION", "").strip(),
         ),
         topology=topology,
         output_dir=Path(env.get("OUTPUT_DIR", "./output")),
