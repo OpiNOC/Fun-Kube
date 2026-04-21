@@ -12,7 +12,7 @@ Il tool deve:
   • supportare topologie: mononodo, single control-plane, HA multi control-plane
   • installare sempre l'ultima versione stabile di Kubernetes (override possibile)
   • usare kubeadm + Calico CNI
-  • supportare addon opzionali: MetalLB, Ingress (Traefik / NPM), Longhorn
+  • supportare addon opzionali: MetalLB, Ingress (Traefik / NPM), Longhorn, DN-essence
   • essere idempotente (ogni riesecuzione converge senza danni)
 
 Sistema target: Ubuntu 24.04 LTS (nodi e bootstrap)
@@ -68,6 +68,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE (Test 7) |
 | ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node (Test 8) |
 | ansible/roles/longhorn        | ✓ testato (Test 9)                   |
+| ansible/roles/dn-essence      | ✓ implementato — Helm OCI, NodePort/ClusterIP, default enabled |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
 
@@ -285,8 +286,9 @@ Fun-Kube/
 │   │   ├── local-path-provisioner.yml  # StorageClass default (single-node)
 │   │   ├── bootstrap-kubeconfig.yml    # SA kubeconfig non-expiring
 │   │   ├── metallb.yml
+│   │   ├── longhorn.yml
 │   │   ├── ingress.yml
-│   │   └── longhorn.yml
+│   │   └── dn-essence.yml
 │   └── roles/
 │       ├── common/                 # sysctl, moduli kernel, swap, chrony, iscsid
 │       ├── containerd/             # containerd.io + SystemdCgroup (v2.x aware)
@@ -300,7 +302,8 @@ Fun-Kube/
 │       ├── metallb/
 │       ├── traefik/
 │       ├── nginx-proxy-manager/
-│       └── longhorn/
+│       ├── longhorn/
+│       └── dn-essence/             # DNS rewrite manager per CoreDNS
 └── output/                         # gitignored — generato da fun-kube up
     ├── inventory.ini
     ├── cluster-info.txt
@@ -419,6 +422,7 @@ Prima del provisioning viene sempre mostrato un riepilogo con:
      → [metallb.yml]
      → [longhorn.yml]     ← PRIMA di ingress (NPM usa SC longhorn/longhorn-rwx)
      → [ingress.yml]      ← Traefik o Nginx Proxy Manager
+     → [dn-essence.yml]   ← default enabled; disabilitabile con DN_ESSENCE_ENABLED=false
 5. output          fetch admin.conf, aggiorna ~/.bashrc, cluster-info.txt
 ```
 
@@ -484,4 +488,12 @@ Helm è installato solo sulla bootstrap machine, non sui nodi CP.
 Tutte le task che usano `helm` nel role `traefik` usano `delegate_to: localhost` con `environment: KUBECONFIG: /root/.kube/{{ cluster_name }}`. Questo pattern vale per qualsiasi tool disponibile solo sulla bootstrap.
 
 **Ordine playbook: longhorn prima di ingress**
-NPM richiede le StorageClass `longhorn` (per MariaDB RWO) e `longhorn-rwx` (per storage condiviso RWX). `ingress.yml` deve quindi essere eseguito DOPO `longhorn.yml`. L'ordine in `runner.py` è: metallb → longhorn → ingress.
+NPM richiede le StorageClass `longhorn` (per MariaDB RWO) e `longhorn-rwx` (per storage condiviso RWX). `ingress.yml` deve quindi essere eseguito DOPO `longhorn.yml`. L'ordine in `runner.py` è: metallb → longhorn → ingress → dn-essence.
+
+**DN-essence default enabled**
+A differenza degli altri addon (default `false`), DN-essence è abilitato di default (`DN_ESSENCE_ENABLED=true`). Per disabilitarlo: `DN_ESSENCE_ENABLED=false` in `.env`.
+Deploy via `helm upgrade --install` con chart OCI (`oci://ghcr.io/opinoc/helm-charts/dn-essence`); idempotente ma incrementa la revisione Helm ad ogni run (comportamento atteso, accettato).
+
+**MetalLB su nodi control-plane (label exclude-from-external-load-balancers)**
+kubeadm applica automaticamente `node.kubernetes.io/exclude-from-external-load-balancers` ai nodi CP. MetalLB layer2 rispetta questo label e non invia ARP reply per i VIP, rendendo i LoadBalancer irraggiungibili dall'esterno su cluster CP-only.
+Fix in `metallb/tasks/main.yml`: se non ci sono nodi worker puri (rilevato via `kubectl get nodes` live), il label viene rimosso da tutti i CP prima di applicare IPAddressPool e L2Advertisement.

@@ -49,6 +49,7 @@ Se non definisci worker, i nodi control-plane vengono detaintati automaticamente
 | Traefik | `INGRESS_TYPE=traefik` | Ingress controller, DaemonSet, LB o NodePort |
 | Nginx Proxy Manager | `INGRESS_TYPE=nginx-proxy-manager` | Ingress con UI web, DaemonSet, LB o NodePort |
 | Longhorn | `LONGHORN_ENABLED=true` | Storage distribuito, RWO e RWX |
+| DN-essence | `DN_ESSENCE_ENABLED=true` *(default)* | DNS rewrite manager per CoreDNS, UI web inclusa |
 
 > Solo uno tra Traefik e Nginx Proxy Manager può essere attivo alla volta.
 
@@ -287,6 +288,31 @@ Fun-Kube mostra un avviso durante `up` se le repliche sono inferiori a 3.
 
 Prerequisiti (`nfs-common`, `open-iscsi`) installati automaticamente su tutti i nodi.
 
+### DN-essence
+
+```ini
+DN_ESSENCE_ENABLED=true              # abilitato di default
+DN_ESSENCE_UI_NODEPORT=30880         # 0 = UI non esposta (accesso solo via port-forward)
+# DN_ESSENCE_VERSION=                # vuoto = ultima versione dal registry OCI
+```
+
+DN-essence gestisce le regole di riscrittura DNS in CoreDNS in modo dichiarativo, tramite Custom Resources Kubernetes (`DNSRewrite`). È utile per risolvere problemi di **hairpin NAT** (domini pubblici che devono puntare a IP interni) e split-horizon DNS.
+
+Offre tre interfacce:
+- **UI web** — accessibile su `http://<node-ip>:<DN_ESSENCE_UI_NODEPORT>`
+- **REST API** — endpoint CRUD per automazione
+- **kubectl** — `kubectl get dnsrewrite -A`
+
+Se `DN_ESSENCE_UI_NODEPORT=0`, la UI è raggiungibile solo tramite port-forward:
+```bash
+kubectl port-forward svc/dn-essence 8080:80 -n dn-essence
+# poi: http://localhost:8080
+```
+
+Il controller sincronizza automaticamente CoreDNS (plugin `reload`) senza restart dei pod.
+
+Per disabilitare completamente: `DN_ESSENCE_ENABLED=false`.
+
 ---
 
 ## CIDR — regole di non sovrapposizione
@@ -379,8 +405,9 @@ Fun-Kube/
     │   ├── local-path-provisioner.yml # StorageClass default (mononodo only)
     │   ├── bootstrap-kubeconfig.yml   # kubeconfig SA non-scadente
     │   ├── metallb.yml
+    │   ├── longhorn.yml
     │   ├── ingress.yml                # Traefik o Nginx Proxy Manager
-    │   └── longhorn.yml
+    │   └── dn-essence.yml
     └── roles/
         ├── common/                    # sysctl, kernel, swap, chrony
         ├── containerd/                # container runtime
@@ -394,7 +421,8 @@ Fun-Kube/
         ├── metallb/
         ├── traefik/                   # DaemonSet, Helm, LB/NodePort, LE
         ├── nginx-proxy-manager/       # DaemonSet, LB/NodePort, multi/single-node
-        └── longhorn/                  # storage distribuito, RWO + RWX
+        ├── longhorn/                  # storage distribuito, RWO + RWX
+        └── dn-essence/               # DNS rewrite manager per CoreDNS, UI web
 ```
 
 ---
