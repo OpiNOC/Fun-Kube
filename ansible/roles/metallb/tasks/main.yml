@@ -51,6 +51,34 @@
   changed_when: false
   ignore_errors: true
 
+- name: Count non-control-plane nodes
+  ansible.builtin.shell: |
+    kubectl get nodes -l '!node-role.kubernetes.io/control-plane' --no-headers 2>/dev/null | wc -l
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  register: _worker_count
+  changed_when: false
+
+- name: Remove exclude-from-external-load-balancers label from control-plane nodes
+  # kubeadm auto-applies this label; MetalLB layer2 respects it and skips ARP on those nodes.
+  # Only needed when there are no pure worker nodes, otherwise MetalLB uses workers for ARP.
+  ansible.builtin.shell: |
+    kubectl label nodes -l node-role.kubernetes.io/control-plane \
+      node.kubernetes.io/exclude-from-external-load-balancers- 2>&1 || true
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  register: _cp_label_fix
+  changed_when: "'labeled' in _cp_label_fix.stdout and 'not labeled' not in _cp_label_fix.stdout"
+  when: _worker_count.stdout | trim == '0'
+
 - name: Render MetalLB IPAddressPool manifest
   ansible.builtin.template:
     src: ipaddresspool.yaml.j2
