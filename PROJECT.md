@@ -68,7 +68,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE (Test 7) |
 | ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node (Test 8) |
 | ansible/roles/longhorn        | ✓ testato (Test 9)                   |
-| ansible/roles/dn-essence      | ✓ implementato — Helm OCI, NodePort/ClusterIP, default enabled |
+| ansible/roles/dn-essence      | ✓ implementato — Helm OCI, NodePort/ClusterIP, default enabled; fix delegate_to: localhost |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
 
@@ -493,6 +493,9 @@ NPM richiede le StorageClass `longhorn` (per MariaDB RWO) e `longhorn-rwx` (per 
 **DN-essence default enabled**
 A differenza degli altri addon (default `false`), DN-essence è abilitato di default (`DN_ESSENCE_ENABLED=true`). Per disabilitarlo: `DN_ESSENCE_ENABLED=false` in `.env`.
 Deploy via `helm upgrade --install` con chart OCI (`oci://ghcr.io/opinoc/helm-charts/dn-essence`); idempotente ma incrementa la revisione Helm ad ogni run (comportamento atteso, accettato).
+Tutte le task (template + Helm + kubectl) usano `delegate_to: localhost` + `KUBECONFIG: /root/.kube/{{ cluster_name }}`, coerente con il pattern usato da Traefik/NPM (Helm è installato solo sulla bootstrap machine).
+Il chart OCI non supporta `service.nodePort` nei values: dopo il deploy viene eseguito un `kubectl patch` idempotente per impostare la porta NodePort specifica (default 30880). Se la porta è già corretta il task viene saltato.
+DN-essence appare nel riepilogo pre-installazione (`_print_cluster_summary` in `cli.py`) con URL UI e versione.
 
 **MetalLB su nodi control-plane (label exclude-from-external-load-balancers)**
 kubeadm applica automaticamente `node.kubernetes.io/exclude-from-external-load-balancers` ai nodi CP. MetalLB layer2 rispetta questo label e non invia ARP reply per i VIP, rendendo i LoadBalancer irraggiungibili dall'esterno su cluster CP-only.

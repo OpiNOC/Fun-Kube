@@ -1,11 +1,13 @@
 # tasks file for dn-essence
+# Tutte le task Helm/kubectl vengono delegate alla bootstrap machine (localhost)
+# che ha già Helm installato e il kubeconfig del cluster in /root/.kube/{{ cluster_name }}.
 ---
 - name: Render DN-essence Helm values
   ansible.builtin.template:
     src: values.yaml.j2
     dest: /tmp/dn-essence-values.yaml
     mode: '0644'
-  delegate_to: "{{ first_cp_hostname }}"
+  delegate_to: localhost
   run_once: true
 
 - name: Deploy DN-essence via Helm
@@ -20,11 +22,37 @@
   args:
     executable: /bin/bash
   environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-  delegate_to: "{{ first_cp_hostname }}"
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
   run_once: true
   register: _dn_essence_deploy
   changed_when: "'has been upgraded' in _dn_essence_deploy.stdout or 'has been installed' in _dn_essence_deploy.stdout"
+
+- name: Get current DN-essence service nodePort
+  ansible.builtin.command: >
+    kubectl get svc dn-essence -n {{ dn_essence_namespace }}
+    -o jsonpath='{.spec.ports[0].nodePort}'
+  environment:
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
+  run_once: true
+  register: _dn_current_np
+  changed_when: false
+  when: dn_essence_ui_nodeport | int > 0
+
+- name: Patch DN-essence service NodePort
+  ansible.builtin.command: >
+    kubectl patch svc dn-essence -n {{ dn_essence_namespace }}
+    --type='json'
+    -p='[{"op":"replace","path":"/spec/ports/0/nodePort","value":{{ dn_essence_ui_nodeport }}}]'
+  environment:
+    KUBECONFIG: /root/.kube/{{ cluster_name }}
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+  when:
+    - dn_essence_ui_nodeport | int > 0
+    - _dn_current_np.stdout != dn_essence_ui_nodeport | string
 
 - name: Show DN-essence access info
   ansible.builtin.debug:

@@ -587,6 +587,7 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
             ("MetalLB", cluster.metallb.enabled),
             (f"Ingress/{cluster.ingress.type}", cluster.ingress.enabled),
             ("Longhorn", cluster.longhorn.enabled),
+            ("DN-essence", cluster.dn_essence.enabled),
         ]
         if enabled
     ]
@@ -676,6 +677,14 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
             console.print(f"    Longhorn RWX      : {lh_rwx}")
             console.print(f"    Longhorn UI       : {lh_ui}")
             console.print(f"    Longhorn repliche : {cluster.longhorn_replicas}")
+        if cluster.dn_essence.enabled:
+            if cluster.dn_essence.ui_nodeport:
+                dn_ui = f"http://{cluster.api_endpoint}:{cluster.dn_essence.ui_nodeport}"
+            else:
+                dn_ui = "ClusterIP only (kubectl port-forward svc/dn-essence 8080:80 -n dn-essence)"
+            console.print(f"    DN-essence UI     : {dn_ui}")
+            if cluster.dn_essence.version:
+                console.print(f"    DN-essence version: {cluster.dn_essence.version}")
     else:
         console.print("  Addon        : nessuno")
 
