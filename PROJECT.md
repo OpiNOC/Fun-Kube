@@ -65,8 +65,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/local-path-provisioner | ✓ testato              |
 | ansible/roles/keepalived      | ✓ testato (Test 4+5)           |
 | ansible/roles/metallb         | ✓ testato (Test 6)                   |
-| ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE (Test 7) |
-| ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node (Test 8) |
+| ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE, externalTrafficPolicy:Local (Test 7) |
+| ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node, externalTrafficPolicy:Local (Test 8) |
 | ansible/roles/longhorn        | ✓ testato (Test 9)                   |
 | ansible/roles/dn-essence      | ✓ implementato — Helm OCI, NodePort/ClusterIP, default enabled; fix delegate_to: localhost |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
@@ -496,6 +496,11 @@ Deploy via `helm upgrade --install` con chart OCI (`oci://ghcr.io/opinoc/helm-ch
 Tutte le task (template + Helm + kubectl) usano `delegate_to: localhost` + `KUBECONFIG: /root/.kube/{{ cluster_name }}`, coerente con il pattern usato da Traefik/NPM (Helm è installato solo sulla bootstrap machine).
 Il chart OCI non supporta `service.nodePort` nei values: dopo il deploy viene eseguito un `kubectl patch` idempotente per impostare la porta NodePort specifica (default 30880). Se la porta è già corretta il task viene saltato.
 DN-essence appare nel riepilogo pre-installazione (`_print_cluster_summary` in `cli.py`) con URL UI e versione.
+
+**externalTrafficPolicy: Local su NodePort e LoadBalancer**
+Con `externalTrafficPolicy: Cluster` (default Kubernetes), kube-proxy applica SNAT al traffico in ingresso: il pod riceve l'IP del nodo anziché l'IP sorgente reale. Questo rompe applicazioni che si affidano al client IP reale (log, rate-limit, geo-block).
+Fix: entrambi i Service (Traefik e NPM) impostano `externalTrafficPolicy: Local` sia in modalità LoadBalancer che NodePort. Con `Local` il nodo serve il traffico solo se ospita un pod locale — condizione sempre vera perché entrambi i controller sono DaemonSet (un pod per nodo). Nessun rischio di connessioni droppate.
+Su cluster esistenti già deployati, ri-eseguire `./fun-kube up` propaga la modifica al Service tramite `kubectl apply` (nessun downtime).
 
 **MetalLB su nodi control-plane (label exclude-from-external-load-balancers)**
 kubeadm applica automaticamente `node.kubernetes.io/exclude-from-external-load-balancers` ai nodi CP. MetalLB layer2 rispetta questo label e non invia ARP reply per i VIP, rendendo i LoadBalancer irraggiungibili dall'esterno su cluster CP-only.

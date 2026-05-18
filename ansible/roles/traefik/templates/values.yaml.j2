@@ -22,6 +22,9 @@ service:
     loadBalancerIP: "{{ traefik_lb_ip }}"
 {% endif %}
     externalTrafficPolicy: Local
+{% else %}
+  spec:
+    externalTrafficPolicy: Local
 {% endif %}
 
 ports:
