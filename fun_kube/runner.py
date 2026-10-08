@@ -103,7 +103,7 @@ def write_output(cluster: ClusterConfig) -> None:
             "",
             "# Keepalived",
             f"VIP:             {cluster.keepalived.vip}",
-            f"Interface:       {cluster.keepalived.interface}",
+            f"Interface:       {cluster.keepalived.interface or 'auto-detect'}",
         ]
 
     if cluster.metallb.enabled:
@@ -253,8 +253,8 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
             "       sleep 20",
             "       sudo mv /tmp/k8s-backup/*.yaml /etc/kubernetes/manifests/",
             "  4. Aggiornare il kubeconfig di emergenza sulla bootstrap:",
-            f"       scp -i {cluster.ssh_key_path} {cluster.ssh_user}@{cluster.first_cp.ip}:",
-            f"           /etc/kubernetes/admin.conf /root/.kube/{cluster.cluster_name}-admin",
+            f"       ssh -i {cluster.ssh_key_path} {cluster.ssh_user}@{cluster.first_cp.ip} \\",
+            f"           'sudo cat /etc/kubernetes/admin.conf' > /root/.kube/{cluster.cluster_name}-admin",
             "  NOTA: il kubeconfig primario (SA token) non richiede aggiornamenti.",
         ]
 
@@ -288,7 +288,7 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
         lines += [
             "",
             f"Keepalived VIP:       {cluster.keepalived.vip}",
-            f"Keepalived interface: {cluster.keepalived.interface}",
+            f"Keepalived interface: {cluster.keepalived.interface or 'auto-detect'}",
         ]
 
     if cluster.metallb.enabled:
@@ -963,17 +963,35 @@ def _fetch_kubeconfig(cluster: ClusterConfig) -> None:
             return
         shutil.copy2(src, dest)
     else:
-        cmd = [
-            "scp",
-            "-i", str(cluster.ssh_key_path),
-            "-o", "StrictHostKeyChecking=no",
-            f"{cluster.ssh_user}@{cluster.first_cp.ip}:/etc/kubernetes/admin.conf",
-            str(dest),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            console.print(f"  [yellow]⚠[/]  admin kubeconfig non recuperato: {result.stderr.strip()}")
+        # admin.conf è leggibile solo da root: con SSH_USER non-root serve sudo
+        # (scp non può farlo). Si prova ogni CP in ordine, così un CP giù non blocca.
+        read_cmd = "cat /etc/kubernetes/admin.conf"
+        if cluster.ssh_user != "root":
+            read_cmd = "sudo -n " + read_cmd
+        content = None
+        last_err = ""
+        for cp in cluster.control_planes:
+            try:
+                result = subprocess.run([
+                    "ssh",
+                    "-i", str(cluster.ssh_key_path),
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "ConnectTimeout=10",
+                    f"{cluster.ssh_user}@{cp.ip}",
+                    read_cmd,
+                ], capture_output=True, text=True, timeout=30)
+            except subprocess.TimeoutExpired:
+                last_err = f"timeout su {cp.ip}"
+                continue
+            if result.returncode == 0 and result.stdout.strip():
+                content = result.stdout
+                break
+            last_err = result.stderr.strip()
+        if content is None:
+            console.print(f"  [yellow]⚠[/]  admin kubeconfig non recuperato: {last_err}")
             return
+        dest.touch(mode=0o600, exist_ok=True)
+        dest.write_text(content)
 
     dest.chmod(0o600)
     console.print(f"  [green]✓[/]  admin kubeconfig (backup) → {dest}")

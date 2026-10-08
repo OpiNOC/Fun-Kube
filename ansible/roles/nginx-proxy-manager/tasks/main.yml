@@ -23,9 +23,12 @@
     reclaimPolicy: Delete
     volumeBindingMode: Immediate
     parameters:
-      numberOfReplicas: "3"
-      staleReplicaTimeout: "20"
-      fsType: ext4
+      numberOfReplicas: "{{ longhorn_replicas | default(3) }}"
+      staleReplicaTimeout: "30"
+      fsType: "ext4"
+      dataLocality: "disabled"
+      dataEngine: "v1"
+      nfsOptions: "vers=4.1,noresvport"
     EOF
   args:
     executable: /bin/bash

@@ -1,6 +1,6 @@
 vrrp_instance VI_1 {
     state {{ 'MASTER' if ansible_play_hosts.index(inventory_hostname) == 0 else 'BACKUP' }}
-    interface {{ keepalived_interface }}
+    interface {{ _keepalived_iface }}
     virtual_router_id 51
     priority {{ 100 if ansible_play_hosts.index(inventory_hostname) == 0 else 50 }}
     advert_int 1

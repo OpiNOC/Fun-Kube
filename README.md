@@ -58,12 +58,12 @@ Se non definisci worker, i nodi control-plane vengono detaintati automaticamente
 ## Requisiti
 
 ### Bootstrap machine
-Ubuntu 22.04 o 24.04. Può essere il tuo laptop, una VM di management, o il nodo stesso (modalità local-node).
+Ubuntu 24.04 LTS. Può essere il tuo laptop, una VM di management, o il nodo stesso (modalità local-node).
 
 Tutte le dipendenze (Python, Ansible, kubectl, Helm) vengono **installate automaticamente** al primo `./fun-kube up`.
 
 ### Nodi del cluster
-- Ubuntu 22.04 o 24.04
+- Ubuntu 24.04 LTS (verificato dal preflight)
 - CPU ≥ 2 core
 - RAM ≥ 2 GB (worker), ≥ 4 GB (control-plane raccomandato)
 - Disco ≥ 20 GB
@@ -191,7 +191,7 @@ SERVICE_CIDR=10.96.0.0/12
 
 KEEPALIVED_ENABLED=true
 KEEPALIVED_VIP=10.0.0.100        # IP libero sulla subnet, non assegnato ad alcun nodo
-KEEPALIVED_INTERFACE=eth0
+KEEPALIVED_INTERFACE=           # vuoto = auto-detect (interfaccia con l'IP del nodo)
 ```
 
 Il `KEEPALIVED_VIP` diventa l'**endpoint del cluster**: è l'IP usato da kubeadm come `--control-plane-endpoint` e presente nel kubeconfig. In caso di failover del CP attivo, il VIP si sposta automaticamente su un altro nodo e il cluster rimane raggiungibile.

@@ -328,6 +328,8 @@ def _print_addon_status(kube_env: dict, cluster) -> None:
         sections.append(_npm_section(kube_env))
     if "longhorn-system" in namespaces:
         sections.append(_longhorn_section(kube_env))
+    if "dn-essence" in namespaces:
+        sections.append(_dn_essence_section(kube_env, cluster))
 
     if sections:
         console.print()
@@ -351,7 +353,7 @@ def _pod_summary(kube_env: dict, namespace: str) -> str:
 
 def _keepalived_section(cluster) -> str:
     import subprocess as sp
-    lines = [f"[bold]Keepalived[/]  VIP: [cyan]{cluster.keepalived.vip}[/]  iface: {cluster.keepalived.interface}"]
+    lines = [f"[bold]Keepalived[/]  VIP: [cyan]{cluster.keepalived.vip}[/]  iface: {cluster.keepalived.interface or 'auto'}"]
     master = None
     for node in cluster.control_planes:
         try:
@@ -408,10 +410,13 @@ def _metallb_section(kube_env: dict) -> str:
             if "\t" not in pool_line:
                 continue
             pool_name, pool_range = pool_line.split("\t", 1)
-            if "-" in pool_range:
+            if "-" in pool_range or "/" in pool_range:
                 try:
-                    s, e = pool_range.split("-")
-                    total = int(ipaddress.ip_address(e.strip())) - int(ipaddress.ip_address(s.strip())) + 1
+                    if "/" in pool_range:
+                        total = ipaddress.ip_network(pool_range.strip(), strict=False).num_addresses
+                    else:
+                        s, e = pool_range.split("-")
+                        total = int(ipaddress.ip_address(e.strip())) - int(ipaddress.ip_address(s.strip())) + 1
                     alloc = len(lb_ips)
                     free = total - alloc
                     free_color = "green" if free > 0 else "red"
@@ -572,6 +577,27 @@ def _longhorn_section(kube_env: dict) -> str:
     return "\n".join(lines)
 
 
+def _dn_essence_section(kube_env: dict, cluster) -> str:
+    lines = ["[bold]DN-essence[/]"]
+
+    rc, out, _ = _kctl(["get", "svc", "dn-essence", "-n", "dn-essence", "--no-headers",
+                         "-o", "custom-columns=TYPE:.spec.type,NP:.spec.ports[0].nodePort"], kube_env)
+    if rc == 0 and out:
+        parts = out.split()
+        if parts and parts[0] == "NodePort" and len(parts) > 1:
+            lines.append(f"  UI: [cyan]http://{cluster.api_endpoint}:{parts[1]}[/]")
+        else:
+            lines.append("  UI: kubectl port-forward svc/dn-essence 8080:80 -n dn-essence")
+
+    rc, out, _ = _kctl(["get", "dnsrewrite", "-A", "--no-headers"], kube_env)
+    if rc == 0:
+        count = len(out.splitlines()) if out else 0
+        lines.append(f"  Regole DNSRewrite: {count}")
+
+    lines.append(f"  Pods: {_pod_summary(kube_env, 'dn-essence')}")
+    return "\n".join(lines)
+
+
 def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
     from .config import ClusterConfig
 
@@ -624,7 +650,7 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
     console.print(f"  Pod CIDR     : {cluster.pod_cidr}")
     console.print(f"  Service CIDR : {cluster.service_cidr}")
     if cluster.topology == "ha":
-        console.print(f"  VIP          : {cluster.keepalived.vip}  (iface: {cluster.keepalived.interface})")
+        console.print(f"  VIP          : {cluster.keepalived.vip}  (iface: {cluster.keepalived.interface or 'auto'})")
     if cluster.local_node:
         console.print(f"  Modalità     : [yellow]local-node[/] (bootstrap = nodo)")
     else:

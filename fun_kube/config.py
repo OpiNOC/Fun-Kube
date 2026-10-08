@@ -8,7 +8,7 @@ import os
 import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Tuple
 
 from dotenv import dotenv_values
 
@@ -297,7 +297,7 @@ def _parse_keepalived(env: dict, topology: Topology) -> KeepalivedConfig:
     return KeepalivedConfig(
         enabled=enabled,
         vip=env.get("KEEPALIVED_VIP", "").strip(),
-        interface=env.get("KEEPALIVED_INTERFACE", "eth0").strip(),
+        interface=env.get("KEEPALIVED_INTERFACE", "").strip(),
     )
 
 
@@ -410,17 +410,20 @@ def _validate(cfg: ClusterConfig) -> List[str]:
             )
 
         if cfg.metallb.enabled and cfg.metallb.ip_pool:
-            for ip in _expand_ip_pool(cfg.metallb.ip_pool):
-                if ip in pod_net:
-                    errors.append(
-                        f"METALLB_IP_POOL contiene {ip} che è dentro POD_CIDR {cfg.pod_cidr}."
-                    )
-                    break
-                if ip in svc_net:
-                    errors.append(
-                        f"METALLB_IP_POOL contiene {ip} che è dentro SERVICE_CIDR {cfg.service_cidr}."
-                    )
-                    break
+            try:
+                pool_start, pool_end = _parse_ip_pool(cfg.metallb.ip_pool)
+            except ValueError:
+                errors.append(
+                    f"METALLB_IP_POOL non valido: '{cfg.metallb.ip_pool}'.\n"
+                    "  Formati ammessi: range (10.0.0.200-10.0.0.220) o CIDR (10.0.0.192/28)."
+                )
+            else:
+                for net, name, label in ((pod_net, "POD_CIDR", cfg.pod_cidr),
+                                         (svc_net, "SERVICE_CIDR", cfg.service_cidr)):
+                    if _range_overlaps(pool_start, pool_end, net):
+                        errors.append(
+                            f"METALLB_IP_POOL {cfg.metallb.ip_pool} si sovrappone a {name} {label}."
+                        )
 
     except ValueError as e:
         errors.append(f"CIDR non valido: {e}")
@@ -432,16 +435,22 @@ def _validate(cfg: ClusterConfig) -> List[str]:
     return warnings
 
 
-def _expand_ip_pool(pool: str) -> List[ipaddress.IPv4Address]:
-    """Espande un range tipo '10.0.0.200-10.0.0.220' in lista di indirizzi."""
+def _parse_ip_pool(pool: str) -> Tuple[ipaddress.IPv4Address, ipaddress.IPv4Address]:
+    """Valida METALLB_IP_POOL ('10.0.0.200-10.0.0.220' o '10.0.0.192/28').
+    Ritorna (primo, ultimo) indirizzo del pool. Solleva ValueError se non valido."""
+    pool = pool.strip()
+    if "/" in pool:
+        net = ipaddress.ip_network(pool, strict=False)
+        return net.network_address, net.broadcast_address
     if "-" not in pool:
-        return [ipaddress.ip_address(pool)]
+        raise ValueError(pool)
     start_str, end_str = pool.split("-", 1)
     start = ipaddress.ip_address(start_str.strip())
     end = ipaddress.ip_address(end_str.strip())
-    result = []
-    current = start
-    while current <= end:
-        result.append(current)
-        current += 1
-    return result
+    if start.version != end.version or start > end:
+        raise ValueError(pool)
+    return start, end
+
+
+def _range_overlaps(start, end, net) -> bool:
+    return start.version == net.version and start <= net.broadcast_address and end >= net.network_address

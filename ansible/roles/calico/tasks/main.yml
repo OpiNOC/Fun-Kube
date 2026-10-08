@@ -8,14 +8,6 @@
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
 
-- name: Download Calico custom resources manifest
-  ansible.builtin.get_url:
-    url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/custom-resources.yaml"
-    dest: /tmp/custom-resources.yaml
-    mode: '0644'
-  delegate_to: "{{ first_cp_hostname }}"
-  run_once: true
-
 - name: Apply Calico operator manifest
   ansible.builtin.command: kubectl apply --server-side --force-conflicts -f /tmp/tigera-operator.yaml
   environment:

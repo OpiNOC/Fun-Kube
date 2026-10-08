@@ -21,16 +21,35 @@
     mode: '0644'
     force: true
 
+# Su kubeadm i kubelet usano certificati self-signed:
+# --kubelet-insecure-tls è obbligatorio altrimenti kubectl top non funziona mai.
+# Il flag va nel manifest PRIMA dell'apply: un patch successivo verrebbe
+# annullato dall'apply al run seguente (args è una lista, viene sostituita),
+# causando due rollout del deployment ad ogni esecuzione.
+- name: Add --kubelet-insecure-tls to manifest
+  ansible.builtin.replace:
+    path: /tmp/metrics-server.yaml
+    regexp: '^(\s+)- --secure-port=10250$'
+    replace: '\1- --secure-port=10250\n\1- --kubelet-insecure-tls'
+
 - name: Apply metrics-server manifest
   ansible.builtin.command: kubectl apply -f /tmp/metrics-server.yaml
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
-  changed_when: true
+  register: _ms_apply
+  changed_when: "'configured' in _ms_apply.stdout or 'created' in _ms_apply.stdout"
 
-# Su kubeadm i kubelet usano certificati self-signed:
-# --kubelet-insecure-tls è obbligatorio altrimenti kubectl top non funziona mai.
-# Usiamo kubectl patch invece di modificare il manifest per essere robusti
-# a cambiamenti upstream nella struttura del file YAML.
+# Rete di sicurezza: se upstream cambia la struttura degli args e il replace
+# sopra non trova la riga, il flag viene aggiunto via patch.
+- name: Check --kubelet-insecure-tls on deployment
+  ansible.builtin.command: >
+    kubectl get deployment metrics-server -n kube-system
+    -o jsonpath='{.spec.template.spec.containers[0].args}'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: _ms_args
+  changed_when: false
+
 - name: Patch deployment — add --kubelet-insecure-tls
   ansible.builtin.command: >
     kubectl patch deployment metrics-server -n kube-system
@@ -39,6 +58,7 @@
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   changed_when: true
+  when: "'--kubelet-insecure-tls' not in _ms_args.stdout"
 
 - name: Wait for metrics-server to be ready
   ansible.builtin.command: >

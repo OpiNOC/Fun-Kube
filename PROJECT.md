@@ -253,6 +253,25 @@ Implementazione e bug trovati/fixati:
   da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
   versione sempre risolta da Python (GitHub API)
 
+### Bug fix (backport da madmin/funkube + review) — 2026-10-08
+- `kubeadm`: il fallback senza versione usava `ansible_failed_result` (definito solo in `rescue:`)
+  e non scattava mai → ora `register` + `when: _k8s_install_strict is failed`; unhold dei
+  pacchetti prima dell'install (necessario per up/downgrade su ri-provisioning)
+- kubeconfig di emergenza: `scp` falliva con `SSH_USER` non-root (`admin.conf` è 0600 root) →
+  `ssh ... sudo -n cat`, con tentativo su ogni CP
+- keepalived: `KEEPALIVED_INTERFACE` vuoto = auto-detect dell'interfaccia che porta l'IP del nodo
+  (fallback: interfaccia della default route); prima default fisso `eth0`
+- `common`: path MTU detection — se l'interfaccia ha MTU > 1500 sonda gli altri nodi con ping DF e
+  porta l'MTU a ≤ 1500 (runtime + drop-in `/etc/netplan/99-fun-kube-mtu.yaml`)
+- metrics-server: `--kubelet-insecure-tls` inserito nel manifest prima dell'apply (il patch
+  successivo veniva annullato dall'apply al run seguente → 2 rollout ad ogni `up`)
+- NPM: variabili `MARIADB_*`; StorageClass `longhorn-rwx` creata dal role NPM allineata a
+  `longhorn.yml` (repliche dinamiche, `nfsOptions`)
+- `METALLB_IP_POOL`: accetta range o CIDR, errore chiaro su formato non valido, check di
+  sovrapposizione esatto senza espandere il range
+- `diagnose`: sezione DN-essence; conteggio IP per pool MetalLB in formato CIDR
+- Calico: rimosso il download inutilizzato di `custom-resources.yaml`
+
 ---
 
 ## Struttura del progetto
@@ -369,7 +388,7 @@ LONGHORN_UI_NODEPORT=31080        # (era 30080 — cambiato per non collidere co
 # HA only
 KEEPALIVED_ENABLED=false
 KEEPALIVED_VIP=192.168.1.100
-KEEPALIVED_INTERFACE=eth0
+KEEPALIVED_INTERFACE=           # vuoto = auto-detect (interfaccia con l'IP del nodo)
 ```
 
 CIDR da tenere non sovrapposti: `POD_CIDR`, `SERVICE_CIDR`, `METALLB_IP_POOL`.

@@ -1,5 +1,33 @@
 # tasks file for keepalived
 ---
+# Auto-detect dell'interfaccia che porta l'IP con cui Ansible raggiunge il nodo
+# (ansible_host), invece di fidarsi dell'interfaccia della default route: su nodi
+# multi-homed la NIC del cluster e quella di default possono essere diverse.
+# Fallback: interfaccia della default route se nessuna interfaccia locale ha quell'IP
+# (es. connessione via NAT / jump host).
+- name: Auto-detect keepalived interface from node IP
+  ansible.builtin.set_fact:
+    _keepalived_iface: >-
+      {%- set found = [] -%}
+      {%- for ifname in ansible_facts.interfaces -%}
+        {%- set f = ansible_facts[ifname | replace('-', '_') | replace('.', '_')] | default({}) -%}
+        {%- if f.ipv4 is defined and f.ipv4.address == ansible_host -%}
+          {%- set _ = found.append(ifname) -%}
+        {%- endif -%}
+        {%- for sec in f.ipv4_secondaries | default([]) -%}
+          {%- if sec.address == ansible_host -%}
+            {%- set _ = found.append(ifname) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ keepalived_interface if keepalived_interface else (found[0] if found else ansible_default_ipv4.interface) }}
+
+- name: Report keepalived interface
+  ansible.builtin.debug:
+    msg: >-
+      keepalived VRRP su '{{ _keepalived_iface }}'
+      ({{ 'impostata in .env' if keepalived_interface else 'auto-detect da ' + ansible_host }})
+
 - name: Install keepalived and ipvsadm
   ansible.builtin.apt:
     name:

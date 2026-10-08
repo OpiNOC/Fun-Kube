@@ -27,6 +27,19 @@
     filename: "kubernetes-{{ k8s_minor_version }}"
   become: true
 
+# Su un ri-provisioning i pacchetti sono in hold: senza unhold apt non può
+# cambiarne la versione (upgrade/downgrade) e l'install fallisce.
+- name: Unhold kubernetes packages (re-provisioning)
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: install
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+  become: true
+  failed_when: false
+
 - name: Install kubelet, kubeadm and kubectl
   ansible.builtin.apt:
     name:
@@ -37,18 +50,19 @@
     update_cache: true
     allow_downgrade: true
   become: true
+  register: _k8s_install_strict
   ignore_errors: true
 
-- name: Install kubelet, kubeadm and kubectl (fallback without strict version)
+# ansible_failed_result esiste solo dentro un blocco rescue: va usato il register.
+- name: Install kubelet, kubeadm and kubectl (fallback — ultima versione del repo minor)
   ansible.builtin.apt:
     name:
       - kubelet
       - kubeadm
       - kubectl
     state: present
-    update_cache: true
   become: true
-  when: ansible_failed_result is defined and ansible_failed_result.failed
+  when: _k8s_install_strict is failed
 
 - name: Hold kubernetes packages
   ansible.builtin.dpkg_selections:

@@ -47,10 +47,10 @@ metadata:
   namespace: {{ npm_namespace }}
 type: Opaque
 stringData:
-  MYSQL_ROOT_PASSWORD: "{{ npm_db_password }}"
-  MYSQL_DATABASE: npm
-  MYSQL_USER: npm
-  MYSQL_PASSWORD: "{{ npm_db_password }}"
+  MARIADB_ROOT_PASSWORD: "{{ npm_db_password }}"
+  MARIADB_DATABASE: npm
+  MARIADB_USER: npm
+  MARIADB_PASSWORD: "{{ npm_db_password }}"
 ---
 ###
 ### MariaDB — Deployment a singola replica (nessun clustering DB)
@@ -74,26 +74,26 @@ spec:
       - name: mariadb
         image: mariadb:10.6
         env:
-        - name: MYSQL_ROOT_PASSWORD
+        - name: MARIADB_ROOT_PASSWORD
           valueFrom:
             secretKeyRef:
               name: npm-db
-              key: MYSQL_ROOT_PASSWORD
-        - name: MYSQL_DATABASE
+              key: MARIADB_ROOT_PASSWORD
+        - name: MARIADB_DATABASE
           valueFrom:
             secretKeyRef:
               name: npm-db
-              key: MYSQL_DATABASE
-        - name: MYSQL_USER
+              key: MARIADB_DATABASE
+        - name: MARIADB_USER
           valueFrom:
             secretKeyRef:
               name: npm-db
-              key: MYSQL_USER
-        - name: MYSQL_PASSWORD
+              key: MARIADB_USER
+        - name: MARIADB_PASSWORD
           valueFrom:
             secretKeyRef:
               name: npm-db
-              key: MYSQL_PASSWORD
+              key: MARIADB_PASSWORD
         ports:
         - containerPort: 3306
           name: mysql
@@ -154,17 +154,17 @@ spec:
           valueFrom:
             secretKeyRef:
               name: npm-db
-              key: MYSQL_USER
+              key: MARIADB_USER
         - name: DB_MYSQL_PASSWORD
           valueFrom:
             secretKeyRef:
               name: npm-db
-              key: MYSQL_PASSWORD
+              key: MARIADB_PASSWORD
         - name: DB_MYSQL_NAME
           valueFrom:
             secretKeyRef:
               name: npm-db
-              key: MYSQL_DATABASE
+              key: MARIADB_DATABASE
         volumeMounts:
         - name: npm-storage
           mountPath: /data

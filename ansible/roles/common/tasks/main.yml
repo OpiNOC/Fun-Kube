@@ -1,5 +1,82 @@
 # tasks file for common
 ---
+# ---------------------------------------------------------------------------
+# Path MTU: con MTU di interfaccia > 1500 (es. 9000 da Proxmox SDN/VXLAN) ma un
+# percorso reale più piccolo, TCP negozia segmenti grandi che vengono scartati in
+# silenzio: ping e pacchetti piccoli passano, handshake TLS ed etcd si bloccano.
+# Si sonda ogni altro nodo con ping DF; il risultato è sempre limitato a 1500
+# (VXLAN di Calico aggiunge ~50 byte e le transazioni etcd grandi hanno bisogno
+# di margine). No-op su mononodo e su interfacce già a <= 1500.
+# ---------------------------------------------------------------------------
+- name: Probe path MTU to the other cluster nodes
+  ansible.builtin.shell: |
+    iface="{{ ansible_default_ipv4.interface }}"
+    current_mtu=$(cat /sys/class/net/$iface/mtu)
+    peers="{{ groups['all'] | reject('equalto', inventory_hostname)
+              | map('extract', hostvars) | map(attribute='ansible_host', default='')
+              | select | join(' ') }}"
+
+    if [ "$current_mtu" -le 1500 ] || [ -z "$peers" ]; then
+      echo "mtu_ok:${current_mtu}"
+      exit 0
+    fi
+
+    best_mtu=1500
+    for peer in $peers; do
+      peer_mtu=""
+      for payload in 1472 1422 1372; do
+        if ping -M do -s $payload -c 2 -W 2 $peer >/dev/null 2>&1; then
+          peer_mtu=$((payload + 28))
+          break
+        fi
+      done
+      # peer non raggiungibile con DF: non abbiamo informazioni, resta 1500
+      if [ -n "$peer_mtu" ] && [ "$peer_mtu" -lt "$best_mtu" ]; then
+        best_mtu=$peer_mtu
+      fi
+    done
+    echo "mtu_change:${current_mtu}:${best_mtu}"
+  args:
+    executable: /bin/bash
+  become: true
+  changed_when: false
+  register: _mtu_probe
+
+- name: Apply detected MTU
+  ansible.builtin.command: >
+    ip link set {{ ansible_default_ipv4.interface }} mtu {{ _mtu_probe.stdout.split(':')[2] }}
+  become: true
+  changed_when: true
+  when: _mtu_probe.stdout.startswith('mtu_change')
+
+# Drop-in separato: netplan fonde le definizioni con lo stesso id, così il file
+# originale (spesso generato da cloud-init) resta intatto.
+- name: Persist detected MTU via netplan drop-in
+  ansible.builtin.copy:
+    dest: /etc/netplan/99-fun-kube-mtu.yaml
+    mode: '0600'
+    content: |
+      # Generato da Fun-Kube (path MTU detection)
+      network:
+        version: 2
+        ethernets:
+          {{ ansible_default_ipv4.interface }}:
+            mtu: {{ _mtu_probe.stdout.split(':')[2] }}
+  become: true
+  when:
+    - _mtu_probe.stdout.startswith('mtu_change')
+    - ansible_default_ipv4.type | default('') == 'ether'
+    - "'.' not in ansible_default_ipv4.interface"
+
+- name: Warn — MTU not persisted (bridge/bond/VLAN interface)
+  ansible.builtin.debug:
+    msg: >-
+      MTU di {{ ansible_default_ipv4.interface }} portato a {{ _mtu_probe.stdout.split(':')[2] }}
+      solo a runtime: interfaccia non fisica, impostare l'MTU nella config netplan a mano.
+  when:
+    - _mtu_probe.stdout.startswith('mtu_change')
+    - ansible_default_ipv4.type | default('') != 'ether' or '.' in ansible_default_ipv4.interface
+
 - name: Set unique hostname
   ansible.builtin.hostname:
     name: "{{ inventory_hostname }}"

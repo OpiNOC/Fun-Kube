@@ -1,4 +1,5 @@
 # defaults file for keepalived
 ---
 keepalived_vip: ""
-keepalived_interface: eth0
+# Vuoto = auto-detect: interfaccia che porta l'IP del nodo (ansible_host)
+keepalived_interface: ""
