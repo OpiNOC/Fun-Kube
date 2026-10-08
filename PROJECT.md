@@ -254,6 +254,33 @@ Implementazione e bug trovati/fixati:
   da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
   versione sempre risolta da Python (GitHub API)
 
+### Upgrade di Kubernetes (`fun-kube upgrade`) — 2026-10-08 — DA TESTARE
+
+Design concordato: patch o +1 minor per esecuzione; drain → upgrade → uncordon un nodo
+alla volta; ripresa automatica; snapshot etcd sulla bootstrap; `.env` aggiornato a fine
+upgrade; mononodo/volumi a 1 replica → fermo workload con conferma esplicita.
+
+- `fun_kube/upgrade.py` — `analyze()`: controlli preliminari senza modifiche; `execute()`:
+  `keepalived.yml` (HA) + `upgrade.yml`, `node-drain-policy` Longhorn impostata ad
+  `always-allow` solo se servono drain con volumi a 1 replica (ripristinata sempre)
+- `ansible/playbooks/upgrade.yml` + `tasks/upgrade-node.yml` — sequenza kubeadm ufficiale;
+  i comandi kubectl (drain/Ready/uncordon) partono dalla bootstrap via VIP
+- `versions.K8S_COMPAT` — minor K8s testate dagli addon alle versioni fissate: blocca un
+  target fuori range (`--ignore-addon-compat` per forzare). Da aggiornare con le versioni
+- keepalived: `vrrp_script` su `https://127.0.0.1:6443/livez` con `weight -60` → il VIP
+  lascia un CP con API server giù (utile anche fuori dall'upgrade); reload invece di
+  restart al cambio di config
+
+Test da eseguire:
+- **Test 16** — `--dry-run` su cluster 1.35.9: piano corretto, nessuna modifica
+- **Test 17** — failover keepalived: fermare kube-apiserver sul MASTER
+  (`mv /etc/kubernetes/manifests/kube-apiserver.yaml /root/`) → il VIP passa a un altro CP
+  entro ~10s; ripristinare il manifest → il VIP torna
+- **Test 18** — upgrade 1.35.9 → 1.36.5 su HA 3+3 con Longhorn e un workload con PVC
+  (verificare snapshot in `output/backups/`, nessun volume degradato, `.env` aggiornato)
+- **Test 19** — ripresa: interrompere (Ctrl+C) durante i worker, rilanciare
+- **Test 20** — mononodo: conferma col nome del cluster richiesta, upgrade senza drain
+
 ### Modifiche su cluster esistente (re-run di `up`) — 2026-10-08
 
 Comportamento di `up` quando il `.env` cambia dopo l'installazione:

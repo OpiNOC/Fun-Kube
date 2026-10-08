@@ -1,3 +1,22 @@
+global_defs {
+    enable_script_security
+    script_user root
+}
+
+# Health check API server locale. Con weight -60:
+#   MASTER sano 100, BACKUP sani 50; MASTER con API giù → 40 → il VIP passa a
+#   un BACKUP sano. Al primo bootstrap (nessun API server ancora attivo) tutti
+#   falliscono: il primo CP scende a 40, gli altri al minimo → il VIP resta sul
+#   primo CP, come richiesto da kubeadm init.
+vrrp_script chk_apiserver {
+    script "/etc/keepalived/check_apiserver.sh"
+    interval 3
+    timeout 3
+    fall 3
+    rise 2
+    weight -60
+}
+
 vrrp_instance VI_1 {
     state {{ 'MASTER' if ansible_play_hosts.index(inventory_hostname) == 0 else 'BACKUP' }}
     interface {{ _keepalived_iface }}
@@ -10,5 +29,8 @@ vrrp_instance VI_1 {
     }
     virtual_ipaddress {
         {{ keepalived_vip }}
+    }
+    track_script {
+        chk_apiserver
     }
 }

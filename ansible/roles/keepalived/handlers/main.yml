@@ -1,7 +1,9 @@
 # handlers file for keepalived
 ---
-- name: Restart keepalived
+# reload (SIGHUP) e non restart: il restart rilascia il VIP sul MASTER e
+# interrompe per qualche secondo l'accesso all'API del cluster.
+- name: Reload keepalived
   ansible.builtin.systemd:
     name: keepalived
-    state: restarted
+    state: reloaded
   become: true

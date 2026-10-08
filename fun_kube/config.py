@@ -204,6 +204,19 @@ def load(env_file: Path) -> ClusterConfig:
     )
 
     cfg.config_warnings.extend(_validate(cfg))
+    if cfg.k8s_version != "latest":
+        addons = ["calico", "cert-manager", "metrics-server"]
+        addons += ["longhorn"] if cfg.longhorn.enabled else []
+        addons += ["traefik"] if cfg.ingress.enabled and cfg.ingress.type == "traefik" else []
+        try:
+            bad = versions.incompatible_addons(cfg.k8s_version, addons)
+        except ValueError:
+            raise ConfigError(f"K8S_VERSION non valida: '{cfg.k8s_version}' (es. v1.35.9 o latest)")
+        if bad:
+            cfg.config_warnings.append(
+                f"K8S_VERSION {cfg.k8s_version}: componenti non testati con questa versione: "
+                + ", ".join(bad) + "."
+            )
     cfg.config_warnings.extend(
         f"{key} in .env viene ignorata: la versione è fissata nel repo "
         f"(fun_kube/versions.py, manifest vendored)."

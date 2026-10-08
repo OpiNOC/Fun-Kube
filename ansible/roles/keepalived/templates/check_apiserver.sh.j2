@@ -1,0 +1,6 @@
+#!/bin/sh
+# Generato da Fun-Kube — health check dell'API server locale per keepalived.
+# Se fallisce, la priorità VRRP del nodo scende (weight in keepalived.conf) e il
+# VIP passa a un control-plane con API server sano (es. durante un upgrade).
+# /livez è accessibile anonimamente (ClusterRole system:public-info-viewer).
+exec curl -sfk --max-time 2 -o /dev/null https://127.0.0.1:6443/livez

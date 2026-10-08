@@ -85,7 +85,11 @@ def _ensure_kubectl() -> None:
         return
     # Stessa versione del cluster di default: l'ultima stable potrebbe uscire dal
     # version skew supportato (kubectl ±1 minor rispetto all'API server).
-    version = versions.K8S_VERSION
+    install_kubectl(versions.K8S_VERSION)
+
+
+def install_kubectl(version: str) -> None:
+    """Installa (o sostituisce) /usr/local/bin/kubectl alla versione indicata."""
     console.print(f"  [cyan]▶[/]  installazione kubectl {version}...")
     arch_raw = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
     # dpkg usa amd64/arm64, dl.k8s.io usa la stessa nomenclatura

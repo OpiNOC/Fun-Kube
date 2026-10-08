@@ -1,0 +1,228 @@
+# Upgrade di un singolo nodo (incluso da upgrade.yml).
+# upgrade_role: first-cp | cp | worker
+#
+# Sequenza (docs kubeadm): kubeadm → upgrade apply/node → drain → kubelet +
+# kubectl → restart kubelet → Ready → uncordon → controlli di salute.
+# I comandi kubectl verso il cluster partono dalla bootstrap (kubeconfig via VIP).
+---
+- name: Get installed kubelet version
+  ansible.builtin.command: dpkg-query -W -f=${Version} kubelet
+  register: _up_kubelet
+  changed_when: false
+
+- name: Get control plane version (kubeadm-config)
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl -n kube-system get cm kubeadm-config -o jsonpath='{.data.ClusterConfiguration}' \
+      | awk '/^kubernetesVersion:/{print $2}'
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: _up_cp_version
+  changed_when: false
+  when: upgrade_role == 'first-cp'
+
+- name: Decide whether node needs upgrade
+  ansible.builtin.set_fact:
+    _up_node_done: >-
+      {{ _up_kubelet.stdout.split('-')[0] == k8s_target[1:]
+         and (upgrade_role != 'first-cp' or _up_cp_version.stdout | trim == k8s_target) }}
+
+- name: Skip node already at target version
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} è già a {{ k8s_target }}: saltato."
+  when: _up_node_done | bool
+
+- name: Upgrade node
+  when: not (_up_node_done | bool)
+  block:
+    # --- Repo apt della minor target -------------------------------------
+    - name: Download Kubernetes GPG key for target minor
+      ansible.builtin.get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor }}/deb/Release.key"
+        dest: "/etc/apt/keyrings/kubernetes-{{ k8s_target_minor }}.asc"
+        mode: '0644'
+        force: false
+
+    - name: Add Kubernetes apt repository for target minor
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-{{ k8s_target_minor }}.asc] https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor }}/deb/ /"
+        state: present
+        filename: "kubernetes-{{ k8s_target_minor }}"
+
+    # --- kubeadm ---------------------------------------------------------
+    - name: Unhold kubeadm
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: install
+
+    - name: Install kubeadm {{ k8s_target }}
+      ansible.builtin.apt:
+        name: "kubeadm={{ k8s_target[1:] }}-1.1"
+        state: present
+        update_cache: true
+        allow_downgrade: false
+
+    - name: Hold kubeadm
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: hold
+
+    # --- Control plane ---------------------------------------------------
+    - name: kubeadm upgrade plan (verifica)
+      ansible.builtin.command: kubeadm upgrade plan {{ k8s_target }}
+      register: _up_plan
+      changed_when: false
+      when:
+        - upgrade_role == 'first-cp'
+        - _up_cp_version.stdout | trim != k8s_target
+
+    - name: kubeadm upgrade apply {{ k8s_target }}
+      ansible.builtin.command: kubeadm upgrade apply {{ k8s_target }} --yes
+      async: 1800
+      poll: 15
+      changed_when: true
+      when:
+        - upgrade_role == 'first-cp'
+        - _up_cp_version.stdout | trim != k8s_target
+
+    - name: kubeadm upgrade node
+      ansible.builtin.command: kubeadm upgrade node
+      async: 1800
+      poll: 15
+      changed_when: true
+      when: upgrade_role != 'first-cp'
+
+    # --- Drain (o solo cordon in modalità fermo workload / mononodo) ------
+    - name: Drain node
+      ansible.builtin.command: >
+        kubectl drain {{ inventory_hostname }}
+        --ignore-daemonsets --delete-emptydir-data --timeout=900s
+      environment:
+        KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+      delegate_to: localhost
+      become: false
+      register: _up_drain
+      until: _up_drain.rc == 0
+      retries: 2
+      delay: 30
+      changed_when: true
+      when: upgrade_drain | bool
+
+    - name: Cordon node (no drain)
+      ansible.builtin.command: kubectl cordon {{ inventory_hostname }}
+      environment:
+        KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+      delegate_to: localhost
+      become: false
+      register: _up_cordon
+      until: _up_cordon.rc == 0
+      retries: 5
+      delay: 10
+      changed_when: true
+      when: not (upgrade_drain | bool)
+
+    # --- kubelet + kubectl -----------------------------------------------
+    - name: Unhold kubelet and kubectl
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: install
+      loop: [kubelet, kubectl]
+
+    - name: Install kubelet and kubectl {{ k8s_target }}
+      ansible.builtin.apt:
+        name:
+          - "kubelet={{ k8s_target[1:] }}-1.1"
+          - "kubectl={{ k8s_target[1:] }}-1.1"
+        state: present
+        allow_downgrade: false
+
+    - name: Hold kubelet and kubectl
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: [kubelet, kubectl]
+
+    - name: Restart kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    # --- Ritorno in servizio ---------------------------------------------
+    - name: Wait for node Ready at {{ k8s_target }}
+      ansible.builtin.command: >
+        kubectl get node {{ inventory_hostname }}
+        -o jsonpath='{.status.nodeInfo.kubeletVersion} {.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+      delegate_to: localhost
+      become: false
+      register: _up_ready
+      until: _up_ready.rc == 0 and _up_ready.stdout == k8s_target ~ ' True'
+      retries: 36
+      delay: 10
+      changed_when: false
+
+- name: Uncordon node
+  ansible.builtin.command: kubectl uncordon {{ inventory_hostname }}
+  environment:
+    KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+  delegate_to: localhost
+  become: false
+  register: _up_uncordon
+  until: _up_uncordon.rc == 0
+  retries: 5
+  delay: 10
+  # anche sui nodi già aggiornati: un run precedente interrotto può averli lasciati cordoned
+  changed_when: "'uncordoned' in _up_uncordon.stdout and 'already' not in _up_uncordon.stdout"
+
+# --- Controlli di salute prima del nodo successivo -----------------------
+- name: Wait for control plane pods on this node
+  ansible.builtin.command: >
+    kubectl -n kube-system wait --for=condition=Ready pod -l tier=control-plane
+    --field-selector spec.nodeName={{ inventory_hostname }} --timeout=300s
+  environment:
+    KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: upgrade_role in ['first-cp', 'cp']
+
+- name: Wait for all nodes Ready
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get nodes --no-headers | awk '$2 != "Ready"' | wc -l
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+  delegate_to: localhost
+  become: false
+  register: _up_notready
+  until: _up_notready.rc == 0 and _up_notready.stdout | trim == '0'
+  retries: 30
+  delay: 10
+  changed_when: false
+
+# Prima di svuotare il nodo successivo le repliche Longhorn devono essere
+# ricostruite, altrimenti il drain successivo può lasciare volumi senza copie.
+- name: Wait for Longhorn volumes healthy
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl -n longhorn-system get volumes.longhorn.io \
+      -o jsonpath='{range .items[*]}{.status.robustness}{"\n"}{end}' \
+      | grep -cv -e '^healthy$' -e '^unknown$' -e '^$' || true
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+  delegate_to: localhost
+  become: false
+  register: _up_lh
+  until: _up_lh.rc == 0 and _up_lh.stdout | trim == '0'
+  retries: 90
+  delay: 20
+  changed_when: false
+  when: longhorn_installed | bool

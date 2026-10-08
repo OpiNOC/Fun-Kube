@@ -1,0 +1,94 @@
+# Upgrade di Kubernetes con kubeadm — lanciato da `fun-kube upgrade`.
+#
+# I controlli preliminari (salto di versione valido, salute del cluster, addon
+# allineati e compatibili, volumi Longhorn) sono fatti in Python prima di qui.
+#
+# Ordine: backup etcd → primo CP (kubeadm upgrade apply) → altri CP → worker,
+# un nodo alla volta, stop al primo errore. I nodi già alla versione target
+# vengono saltati: rilanciare il comando dopo un errore riprende da dove si era
+# fermato.
+#
+# Extra-vars specifiche: k8s_target (v1.36.5), k8s_target_minor (1.36),
+# upgrade_drain (false = solo cordon: mononodo / fermo workload),
+# longhorn_installed, backup_dir.
+---
+- name: Backup etcd before upgrade
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Set backup file name
+      ansible.builtin.set_fact:
+        _etcd_backup: "etcd-{{ cluster_name }}-{{ lookup('ansible.builtin.pipe', 'date +%Y%m%d-%H%M%S') }}-pre-{{ k8s_target }}.db"
+
+    # etcdctl è incluso nell'immagine etcd; /var/lib/etcd è montato dal pod.
+    - name: Take etcd snapshot
+      ansible.builtin.command: >
+        kubectl -n kube-system exec etcd-{{ inventory_hostname }} --
+        etcdctl --endpoints=https://127.0.0.1:2379
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt
+        --cert=/etc/kubernetes/pki/etcd/server.crt
+        --key=/etc/kubernetes/pki/etcd/server.key
+        snapshot save /var/lib/etcd/{{ _etcd_backup }}
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+
+    - name: Move snapshot out of the etcd data dir
+      ansible.builtin.shell: |
+        mkdir -p /var/backups/fun-kube
+        mv /var/lib/etcd/{{ _etcd_backup }} /var/backups/fun-kube/{{ _etcd_backup }}
+        chmod 600 /var/backups/fun-kube/{{ _etcd_backup }}
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Copy snapshot to bootstrap machine
+      ansible.builtin.fetch:
+        src: "/var/backups/fun-kube/{{ _etcd_backup }}"
+        dest: "{{ backup_dir }}/"
+        flat: true
+
+    - name: Report backup
+      ansible.builtin.debug:
+        msg: >-
+          Snapshot etcd: {{ backup_dir }}/{{ _etcd_backup }}
+          (copia anche su {{ inventory_hostname }}:/var/backups/fun-kube/)
+
+
+- name: Upgrade first control-plane (kubeadm upgrade apply)
+  hosts: control_plane[0]
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Upgrade node
+      ansible.builtin.include_tasks: tasks/upgrade-node.yml
+      vars:
+        upgrade_role: first-cp
+
+
+- name: Upgrade other control-planes
+  hosts: control_plane[1:]
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+  any_errors_fatal: true
+  tasks:
+    - name: Upgrade node
+      ansible.builtin.include_tasks: tasks/upgrade-node.yml
+      vars:
+        upgrade_role: cp
+
+
+- name: Upgrade workers
+  hosts: workers
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+  any_errors_fatal: true
+  tasks:
+    - name: Upgrade node
+      ansible.builtin.include_tasks: tasks/upgrade-node.yml
+      vars:
+        upgrade_role: worker

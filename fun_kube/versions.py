@@ -27,6 +27,40 @@ TRAEFIK_CHART_VERSION = "41.6.1"
 NPM_IMAGE_VERSION = "2.16.0"
 MARIADB_IMAGE_VERSION = "11.4"
 
+# Versioni minor di Kubernetes supportate/testate dagli addon alle versioni
+# fissate sopra: (min, max), max None = nessun limite dichiarato.
+# Da aggiornare insieme alle versioni (fonti: pagine "requirements" upstream).
+# `fun-kube upgrade` rifiuta un target fuori da questi intervalli.
+K8S_COMPAT = {
+    "calico":         (34, 36),    # docs.tigera.io/calico/3.32 — testato 1.34–1.36
+    "cert-manager":   (33, 36),    # cert-manager.io/docs/releases — 1.21: 1.33–1.36
+    "metrics-server": (34, None),  # README compatibility matrix — 0.9.x: 1.34+
+    "longhorn":       (33, 36),    # longhorn.io/docs/1.12.1 — testato 1.33–1.36
+    "metallb":        (None, None),  # nessuna matrice ufficiale
+    "traefik":        (25, None),  # Chart.yaml kubeVersion >=1.25
+}
+
+
+def k8s_minor(version: str) -> int:
+    """'v1.35.9' → 35. Solleva ValueError se il formato non è vX.Y[.Z]."""
+    parts = version.lstrip("v").split(".")
+    if len(parts) < 2 or parts[0] != "1":
+        raise ValueError(version)
+    return int(parts[1])
+
+
+def incompatible_addons(target: str, addons) -> list:
+    """Addon (nomi in K8S_COMPAT) che non supportano la versione target."""
+    minor = k8s_minor(target)
+    out = []
+    for name in addons:
+        lo, hi = K8S_COMPAT.get(name, (None, None))
+        if (lo is not None and minor < lo) or (hi is not None and minor > hi):
+            rng = f"1.{lo if lo is not None else '?'}–{'1.' + str(hi) if hi is not None else '…'}"
+            out.append(f"{name} (supporta {rng})")
+    return out
+
+
 # Manifest vendored: (file di destinazione, URL)
 VENDORED_MANIFESTS = [
     ("calico/files/operator-crds.yaml",

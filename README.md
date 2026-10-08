@@ -371,6 +371,12 @@ Fun-Kube verifica le sovrapposizioni all'avvio e blocca con un errore chiaro se 
 
 ./fun-kube diagnose [.env]    # stato nodi: kubelet, containerd, disco, RAM, versioni
 
+./fun-kube upgrade --to v1.36.5 [.env]   # aggiorna Kubernetes (kubeadm upgrade)
+  --dry-run                   # solo controlli e piano, nessuna modifica
+  --yes / -y                  # salta la conferma (non basta se l'upgrade ferma i workload)
+  --allow-downtime            # accetta il fermo dei workload senza conferma interattiva
+  --ignore-addon-compat       # procede anche con addon non testati sulla versione target
+
 ./fun-kube check-deps         # verifica tool sulla bootstrap machine
   --verbose                   # mostra le versioni
 ```
@@ -396,6 +402,36 @@ Al termine dell'installazione:
 
 ---
 
+## Upgrade di Kubernetes
+
+```bash
+./fun-kube upgrade --to v1.36.5 --dry-run   # controlli + piano
+./fun-kube upgrade --to v1.36.5
+```
+
+- Solo **patch** o **una minor version** alla volta (1.35.x → 1.36.y): per salti più ampi
+  ripetere il comando.
+- Controlli prima di toccare il cluster: nodi Ready, API server pronto, pod di
+  kube-system sani, nodi del cluster = nodi del `.env`, pacchetto disponibile nel repo
+  apt, addon allineati alle versioni del repo e compatibili con il target, volumi
+  Longhorn healthy. Se un controllo fallisce l'upgrade non parte.
+- Snapshot di etcd copiato sulla bootstrap (`output/backups/`) prima di iniziare.
+- Primo control-plane (`kubeadm upgrade apply`), poi gli altri CP e i worker
+  (`kubeadm upgrade node`), **un nodo alla volta**: drain → kubelet → Ready → uncordon,
+  con controlli di salute (e attesa dei volumi Longhorn) prima del nodo successivo.
+- In HA, keepalived sposta il VIP se l'API server del nodo che lo detiene non risponde.
+- Se si ferma a metà, rilanciare lo stesso comando: i nodi già aggiornati vengono saltati.
+- A fine upgrade aggiorna `K8S_VERSION` nel `.env` e kubectl sulla bootstrap.
+- Mononodo o volumi Longhorn con una sola replica: l'upgrade comporta un fermo dei
+  workload e richiede conferma esplicita (nome del cluster) o `--allow-downtime`.
+- L'upgrade di una minor version **non è reversibile**: lo snapshot etcd serve per il
+  disaster recovery, non come "annulla".
+
+`up` non aggiorna mai Kubernetes: se `K8S_VERSION` differisce dalla versione dei nodi
+già nel cluster si ferma e indica di usare `upgrade`.
+
+---
+
 ## Certificati — rinnovo automatico
 
 Fun-Kube installa un systemd timer su ogni nodo control-plane che rinnova i certificati ogni mese con `kubeadm certs renew all` e riavvia automaticamente i componenti del control-plane.
@@ -418,6 +454,7 @@ Fun-Kube/
 │   ├── preflight.py              # check pre-installazione sui nodi
 │   ├── runner.py                 # inventory + sequenza playbook + output
 │   ├── deps.py                   # verifica e auto-install tool bootstrap
+│   ├── upgrade.py                # comando upgrade (controlli + esecuzione)
 │   └── versions.py               # versioni di tutti i componenti
 ├── scripts/
 │   └── vendor-manifests.py       # riscarica i manifest vendored

@@ -49,9 +49,10 @@
     msg: >-
       {{ inventory_hostname }} fa già parte del cluster con kubelet
       {{ _kubelet_installed.stdout.split('-')[0] }}, ma la versione richiesta è
-      {{ k8s_version_resolved | regex_replace('^v', '') }}. Fun-Kube non esegue
-      upgrade di Kubernetes (servirebbe kubeadm upgrade, un nodo alla volta):
-      riportare K8S_VERSION in .env a v{{ _kubelet_installed.stdout.split('-')[0] }}.
+      {{ k8s_version_resolved | regex_replace('^v', '') }}. up non aggiorna Kubernetes:
+      riportare K8S_VERSION in .env a v{{ _kubelet_installed.stdout.split('-')[0] }}
+      e usare ./fun-kube upgrade --to {{ k8s_version_resolved }} (kubeadm upgrade,
+      un nodo alla volta, aggiorna anche il .env).
       Nota: K8S_VERSION=latest cambia valore quando esce una nuova versione upstream.
   when:
     - _k8s_joined.stat.exists

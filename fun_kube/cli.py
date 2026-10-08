@@ -147,6 +147,129 @@ def check_deps(
 
 
 @app.command()
+def upgrade(
+    to: str = typer.Option(..., "--to", help="Versione target, es. v1.36.5 (patch o +1 minor)"),
+    env_file: Path = typer.Argument(Path(".env")),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Solo analisi e piano, nessuna modifica"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Salta la conferma (non basta se c'è fermo workload)"),
+    allow_downtime: bool = typer.Option(False, "--allow-downtime",
+                                        help="Accetta il fermo dei workload senza conferma interattiva"),
+    ignore_addon_compat: bool = typer.Option(False, "--ignore-addon-compat",
+                                             help="Procede anche con addon non testati sulla versione target"),
+    debug: bool = typer.Option(False, "--debug"),
+) -> None:
+    """Aggiorna Kubernetes (kubeadm upgrade), un nodo alla volta."""
+    from . import upgrade as upg
+
+    console.print(Panel(
+        "[bold cyan]Fun-Kube Upgrade[/] — Kubernetes (kubeadm), un nodo alla volta",
+        expand=False,
+    ))
+
+    try:
+        deps.run(verbose=False)
+    except DepsError as e:
+        err.print(f"\n[red]Dipendenze mancanti:[/]\n{e}")
+        raise typer.Exit(1)
+
+    try:
+        cluster = cfg_module.load(env_file)
+    except ConfigError as e:
+        err.print(f"\n[red]Errore di configurazione:[/]\n{e}")
+        raise typer.Exit(1)
+
+    console.print("\n[bold]Analisi del cluster...[/]")
+    try:
+        plan = upg.analyze(cluster, to, ignore_addon_compat=ignore_addon_compat)
+    except upg.UpgradeError as e:
+        err.print(f"\n[red]Upgrade non possibile:[/]\n  {e}")
+        raise typer.Exit(1)
+
+    _print_upgrade_plan(cluster, plan)
+
+    if dry_run:
+        console.print("\n[green]--dry-run: controlli superati. Nessuna modifica effettuata.[/]")
+        raise typer.Exit(0)
+
+    if plan.downtime_reasons:
+        if allow_downtime:
+            console.print("\n[yellow]Fermo dei workload accettato (--allow-downtime).[/]")
+        elif yes:
+            err.print("\n[red]L'upgrade ferma i workload: con --yes serve anche --allow-downtime.[/]")
+            raise typer.Exit(1)
+        else:
+            answer = typer.prompt(
+                "\nL'upgrade FERMA I WORKLOAD. Digita il nome del cluster per confermare",
+                default="",
+            )
+            if answer != cluster.cluster_name:
+                console.print("[yellow]Upgrade annullato.[/]")
+                raise typer.Exit(0)
+    elif not yes:
+        console.print()
+        if not typer.confirm("Procedere con l'upgrade?", default=False):
+            console.print("[yellow]Upgrade annullato.[/]")
+            raise typer.Exit(0)
+
+    console.print("\n[bold]Upgrade in corso...[/]")
+    try:
+        backup_dir = upg.execute(cluster, plan, env_file, debug=debug)
+    except KeyboardInterrupt:
+        err.print("\n[yellow]Upgrade interrotto (Ctrl+C).[/] Rilanciare lo stesso comando per riprendere.")
+        raise typer.Exit(130)
+    except (runner.RunnerError, upg.UpgradeError) as e:
+        err.print(
+            f"\n[red]Upgrade fermato:[/]\n  {e}\n\n"
+            "  I nodi già aggiornati restano alla nuova versione. Dopo aver risolto,\n"
+            f"  rilanciare: ./fun-kube upgrade --to {plan.target} {env_file}\n"
+            f"  Snapshot etcd pre-upgrade in: {(cluster.output_dir / 'backups').resolve()}"
+        )
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold green]✓ Cluster '{cluster.cluster_name}' aggiornato a {plan.target}[/]")
+    console.print(f"  Snapshot etcd pre-upgrade: {backup_dir}")
+    console.print(f"  K8S_VERSION aggiornato in {env_file}")
+
+
+def _print_upgrade_plan(cluster, plan) -> None:
+    console.print()
+    title = "Ripresa upgrade" if plan.resume else "Piano di upgrade"
+    console.print(Panel(
+        f"[bold]Cluster:[/] [cyan]{cluster.cluster_name}[/]  |  "
+        f"[bold]Control plane:[/] {plan.current} → [cyan]{plan.target}[/]",
+        title=title, expand=False,
+    ))
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Nodo", style="cyan")
+    table.add_column("Ruolo")
+    table.add_column("Azione")
+    order = cluster.control_planes + cluster.workers
+    for i, n in enumerate(order, 1):
+        if n.hostname not in plan.nodes_todo and not (i == 1 and not plan.resume):
+            action = "[dim]già aggiornato — saltato[/]"
+        elif i == 1:
+            action = "kubeadm upgrade apply + kubelet"
+        else:
+            action = "kubeadm upgrade node + kubelet"
+        table.add_row(str(i), n.hostname, n.role, action)
+    console.print(table)
+    console.print()
+    console.print(f"  Modalità     : {'drain → upgrade → uncordon' if plan.drain else '[yellow]solo cordon (nessun drain)[/]'}")
+    console.print(f"  Backup       : snapshot etcd → {(cluster.output_dir / 'backups').resolve()}")
+    if cluster.topology == "ha":
+        console.print("  Keepalived   : health check API server sul VIP (applicato prima dell'upgrade)")
+    if plan.addons:
+        console.print("  Addon        : " + ", ".join(f"{a} {v}" for a, v in plan.addons.items()))
+    for w in plan.warnings:
+        console.print(f"  [yellow]⚠  {w}[/]")
+    if plan.downtime_reasons:
+        console.print("\n  [bold yellow]FERMO WORKLOAD:[/]")
+        for r in plan.downtime_reasons:
+            console.print(f"  [yellow]•  {r}[/]")
+
+
+@app.command()
 def reset(
     env_file: Path = typer.Argument(Path(".env")),
     yes: bool = typer.Option(False, "--yes", "-y", help="Salta la conferma interattiva"),
