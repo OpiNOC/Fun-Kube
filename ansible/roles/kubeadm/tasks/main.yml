@@ -27,8 +27,40 @@
     filename: "kubernetes-{{ k8s_minor_version }}"
   become: true
 
-# Su un ri-provisioning i pacchetti sono in hold: senza unhold apt non può
-# cambiarne la versione (upgrade/downgrade) e l'install fallisce.
+# Su un nodo già nel cluster cambiare versione ai pacchetti NON è un upgrade:
+# kubelet diventerebbe più nuovo dell'API server (skew non supportato) senza
+# passare da `kubeadm upgrade`. Il cambio di versione è permesso solo su nodi
+# non ancora joinati (nodi nuovi o dopo `fun-kube reset`).
+- name: Check if node is already part of a cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: _k8s_joined
+  become: true
+
+- name: Get installed kubelet version
+  ansible.builtin.command: dpkg-query -W -f=${Version} kubelet
+  register: _kubelet_installed
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Fail on Kubernetes version change on a running node
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} fa già parte del cluster con kubelet
+      {{ _kubelet_installed.stdout.split('-')[0] }}, ma la versione richiesta è
+      {{ k8s_version_resolved | regex_replace('^v', '') }}. Fun-Kube non esegue
+      upgrade di Kubernetes (servirebbe kubeadm upgrade, un nodo alla volta):
+      riportare K8S_VERSION in .env a v{{ _kubelet_installed.stdout.split('-')[0] }}.
+      Nota: K8S_VERSION=latest cambia valore quando esce una nuova versione upstream.
+  when:
+    - _k8s_joined.stat.exists
+    - _kubelet_installed.rc == 0
+    - _kubelet_installed.stdout | length > 0
+    - _kubelet_installed.stdout.split('-')[0] != k8s_version_resolved | regex_replace('^v', '')
+
+# Su un ri-provisioning dopo reset i pacchetti sono in hold: senza unhold apt
+# non può cambiarne la versione (upgrade/downgrade) e l'install fallisce.
 - name: Unhold kubernetes packages (re-provisioning)
   ansible.builtin.dpkg_selections:
     name: "{{ item }}"

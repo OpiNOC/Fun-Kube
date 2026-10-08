@@ -254,6 +254,31 @@ Implementazione e bug trovati/fixati:
   da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
   versione sempre risolta da Python (GitHub API)
 
+### Modifiche su cluster esistente (re-run di `up`) — 2026-10-08
+
+Comportamento di `up` quando il `.env` cambia dopo l'installazione:
+
+| Modifica | Comportamento |
+|---|---|
+| Pool MetalLB, parametri Traefik, NodePort NPM/DN-essence/Longhorn UI | applicati |
+| Nuovo worker / nuovo CP in cluster già HA | join; preflight completo sul solo nodo nuovo |
+| Addon abilitato dopo | installato |
+| Addon messo a `false` | **non disinstallato** (playbook saltato, resta com'è) |
+| Nodo rimosso dal `.env` | non toccato — warning con comandi drain/delete |
+| Repliche Longhorn cambiate (nodi aggiunti) | SC `longhorn` aggiornata via ConfigMap `longhorn-storageclass`, `longhorn-rwx` ricreata; volumi esistenti invariati |
+| Primi worker su cluster solo-CP | warning: i CP restano senza taint (comando per ri-applicarlo) |
+| `KEEPALIVED_VIP` / endpoint (anche 1 CP → HA), `POD_CIDR`, `SERVICE_CIDR` | **errore prima di toccare i nodi** — richiede reset + up |
+| `NPM_DB_PASSWORD` | **errore** — procedura ALTER USER nel file di manutenzione |
+| `K8S_VERSION` su nodi già nel cluster | **errore** — Fun-Kube non fa `kubeadm upgrade` |
+| `CONTAINERD_VERSION` su nodi già nel cluster | versione installata mantenuta + warning |
+
+Il confronto `.env` ↔ cluster (`preflight.check_existing_cluster`) usa il kubeconfig
+della bootstrap e legge `kubeadm-config`, nodi, Secret `npm-db`, StorageClass longhorn.
+Se il cluster non è raggiungibile il confronto viene saltato.
+
+Fix inclusi: il patch diretto delle repliche sulla SC `longhorn` era rifiutato dall'API
+(`parameters` immutabili) → `up` falliva già alla prima installazione con < 3 nodi schedulabili.
+
 ### Aggiornamento versioni — 2026-10-08 — DA TESTARE
 
 | Componente | Versione |

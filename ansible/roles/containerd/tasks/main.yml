@@ -48,6 +48,34 @@
       apt-cache madison containerd.io
   when: _containerd_exact_ver.stdout | trim == ""
 
+# Su un nodo già nel cluster il cambio di versione riavvierebbe containerd (e
+# tutti i container) su tutti i nodi in contemporanea: si mantiene la versione
+# installata e si segnala. Nodi nuovi o dopo reset ricevono la versione pinnata.
+- name: Check if node is already part of a cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: _ctd_joined
+  become: true
+
+- name: Get installed containerd.io version
+  ansible.builtin.command: dpkg-query -W -f=${Version} containerd.io
+  register: _containerd_installed
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Warn — containerd version differs on running node (not changed)
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: containerd.io {{ _containerd_installed.stdout }} installato,
+      versione fissata {{ _containerd_exact_ver.stdout | trim }}. Nodo già nel cluster:
+      versione NON modificata. Per aggiornarlo: drain del nodo, apt install
+      containerd.io={{ _containerd_exact_ver.stdout | trim }}, uncordon.
+  when:
+    - _ctd_joined.stat.exists
+    - _containerd_installed.rc == 0
+    - _containerd_installed.stdout != _containerd_exact_ver.stdout | trim
+
 - name: Install containerd.io (pinned)
   ansible.builtin.apt:
     name: "containerd.io={{ _containerd_exact_ver.stdout | trim }}"
@@ -55,6 +83,10 @@
     allow_downgrade: true
   become: true
   notify: Restart containerd
+  when: >-
+    not _ctd_joined.stat.exists
+    or _containerd_installed.rc != 0
+    or _containerd_installed.stdout == _containerd_exact_ver.stdout | trim
 
 - name: Ensure /etc/containerd directory exists
   ansible.builtin.file:

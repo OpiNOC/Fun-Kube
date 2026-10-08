@@ -67,6 +67,16 @@ def up(
 
     _check_kubectl_skew(cluster)
 
+    # Confronto con il cluster esistente (se raggiungibile): blocca le modifiche
+    # che up non sa applicare prima di toccare qualsiasi nodo.
+    drift_errors, drift_warnings = preflight.check_existing_cluster(cluster)
+    cluster.config_warnings.extend(drift_warnings)
+    if drift_errors:
+        err.print("\n[red]Il .env non è compatibile con il cluster esistente:[/]")
+        for e in drift_errors:
+            err.print(f"  • {e}")
+        raise typer.Exit(1)
+
     # --- Riepilogo e conferma ---
     _print_cluster_summary(cluster)
 
@@ -712,7 +722,7 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
                 console.print(f"    Ingress service   : {svc_detail}")
                 console.print(f"    Admin UI          : {admin_url}")
                 if ing.npm_db_password == "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW":
-                    console.print(f"    [yellow]⚠  NPM_DB_PASSWORD è il valore di default — cambiarlo in .env![/]")
+                    console.print(f"    [yellow]⚠  NPM_DB_PASSWORD è il valore di default — cambiarlo in .env PRIMA della prima installazione di NPM[/]")
         if cluster.longhorn.enabled:
             lh_ver = versions.LONGHORN_VERSION
             lh_rwx = "sì" if cluster.longhorn.rwx else "no"

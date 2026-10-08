@@ -726,8 +726,22 @@ def _ingress_maintenance_lines(cluster: "ClusterConfig") -> list:
             lines += [
                 "",
                 "ATTENZIONE: NPM_DB_PASSWORD è il valore di default.",
-                "  Aggiornare NPM_DB_PASSWORD in .env e rieseguire fun-kube up.",
             ]
+        lines += [
+            "",
+            "Cambio password DB (NPM_DB_PASSWORD):",
+            "  MariaDB conserva la password con cui è stato inizializzato: cambiare solo",
+            "  .env e rieseguire up rompe la connessione NPM → DB (up lo blocca).",
+            "  1. Cambiare la password dentro MariaDB:",
+            "       kubectl -n npm-system exec deploy/npm-mariadb -- mariadb -uroot -p'<VECCHIA>' -e \\",
+            "         \"ALTER USER 'npm'@'%' IDENTIFIED BY '<NUOVA>';",
+            "          ALTER USER 'root'@'%' IDENTIFIED BY '<NUOVA>';",
+            "          ALTER USER 'root'@'localhost' IDENTIFIED BY '<NUOVA>';\"",
+            "  2. Impostare NPM_DB_PASSWORD=<NUOVA> in .env",
+            "  3. ./fun-kube up   (aggiorna il Secret npm-db)",
+            "  4. kubectl -n npm-system rollout restart daemonset/nginx-proxy-manager",
+            "     (i pod leggono il Secret solo all'avvio)",
+        ]
     return lines
 
 

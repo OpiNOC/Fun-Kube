@@ -77,15 +77,42 @@
           ({{ lh_installed_version.stdout | default('') or 'non installato' }} → {{ longhorn_version }})
       when: longhorn_enabled | default(false) | bool
 
-    # Manifest vendored in roles/longhorn/files/ (versione in fun_kube/versions.py).
-    - name: Copy Longhorn manifest
+    # La StorageClass "longhorn" è generata da longhorn-manager a partire dalla
+    # ConfigMap longhorn-storageclass. I parameters di una StorageClass sono
+    # immutabili: le repliche si cambiano nella ConfigMap (longhorn-manager
+    # ricrea la SC), mai con un patch diretto sulla SC (rifiutato dall'API).
+    - name: Get current replicas of StorageClass longhorn
+      ansible.builtin.command: >
+        kubectl get storageclass longhorn -o jsonpath='{.parameters.numberOfReplicas}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: _lh_sc_replicas
+      changed_when: false
+      failed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Decide whether to apply the Longhorn manifest
+      ansible.builtin.set_fact:
+        _lh_apply: >-
+          {{ _lh_action in ['install', 'upgrade']
+             or (_lh_action == 'skip'
+                 and _lh_sc_replicas.rc == 0
+                 and _lh_sc_replicas.stdout != longhorn_replicas | string) }}
+      when: longhorn_enabled | default(false) | bool
+
+    # Manifest vendored in roles/longhorn/files/ (versione in fun_kube/versions.py),
+    # con le repliche della ConfigMap longhorn-storageclass adattate al cluster.
+    - name: Copy Longhorn manifest (replicas = {{ longhorn_replicas }})
       ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../roles/longhorn/files/longhorn.yaml"
+        content: >-
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../roles/longhorn/files/longhorn.yaml')
+             | replace('      numberOfReplicas: "3"',
+                       '      numberOfReplicas: "' ~ longhorn_replicas ~ '"') }}
         dest: /tmp/longhorn.yaml
         mode: '0644'
       when:
         - longhorn_enabled | default(false) | bool
-        - _lh_action in ['install', 'upgrade']
+        - _lh_apply | bool
 
     - name: Apply Longhorn manifest (client-side apply)
       # Client-side apply: non rimuove campi gestiti da longhorn-manager (es. conversion webhook CA).
@@ -97,7 +124,7 @@
       changed_when: true
       when:
         - longhorn_enabled | default(false) | bool
-        - _lh_action in ['install', 'upgrade']
+        - _lh_apply | bool
 
     - name: Wait for longhorn-manager DaemonSet to exist
       ansible.builtin.command: >
@@ -138,15 +165,55 @@
       changed_when: false
       when: longhorn_enabled | default(false) | bool
 
-    - name: Patch longhorn StorageClass replicas
+    - name: Wait for StorageClass longhorn to have {{ longhorn_replicas }} replicas
       ansible.builtin.command: >
-        kubectl patch storageclass longhorn
-        --type=merge
-        -p '{"parameters":{"numberOfReplicas":"{{ longhorn_replicas | default(3) }}"}}'
+        kubectl get storageclass longhorn -o jsonpath='{.parameters.numberOfReplicas}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: _lh_sc_replicas_after
+      retries: 12
+      delay: 10
+      until: _lh_sc_replicas_after.stdout == longhorn_replicas | string
+      changed_when: false
+      failed_when: false
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Warn — StorageClass longhorn replicas not updated
+      ansible.builtin.debug:
+        msg: >-
+          StorageClass longhorn ha numberOfReplicas={{ _lh_sc_replicas_after.stdout }},
+          atteso {{ longhorn_replicas }}. longhorn-manager non l'ha ricreata dalla ConfigMap
+          longhorn-storageclass: verificare con
+          kubectl -n {{ longhorn_namespace }} get cm longhorn-storageclass -o yaml.
+          I volumi esistenti non cambiano repliche (impostabili dalla UI Longhorn).
+      when:
+        - longhorn_enabled | default(false) | bool
+        - _lh_sc_replicas_after.stdout != longhorn_replicas | string
+
+    # longhorn-rwx è gestita da Fun-Kube: parameters immutabili → se le repliche
+    # cambiano va ricreata. Eliminare una StorageClass non tocca PV/PVC esistenti.
+    - name: Get current replicas of StorageClass longhorn-rwx
+      ansible.builtin.command: >
+        kubectl get storageclass longhorn-rwx -o jsonpath='{.parameters.numberOfReplicas}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: _lh_rwx_replicas
+      changed_when: false
+      failed_when: false
+      when:
+        - longhorn_enabled | default(false) | bool
+        - longhorn_rwx | default(false) | bool
+
+    - name: Delete longhorn-rwx StorageClass (replicas changed)
+      ansible.builtin.command: kubectl delete storageclass longhorn-rwx
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: true
-      when: longhorn_enabled | default(false) | bool
+      when:
+        - longhorn_enabled | default(false) | bool
+        - longhorn_rwx | default(false) | bool
+        - _lh_rwx_replicas.rc == 0
+        - _lh_rwx_replicas.stdout != longhorn_replicas | string
 
     - name: Create longhorn-rwx StorageClass
       ansible.builtin.shell: |
@@ -160,7 +227,7 @@
         reclaimPolicy: Delete
         volumeBindingMode: Immediate
         parameters:
-          numberOfReplicas: "{{ longhorn_replicas | default(3) }}"
+          numberOfReplicas: "{{ longhorn_replicas }}"
           staleReplicaTimeout: "30"
           fromBackup: ""
           fsType: "ext4"
@@ -198,10 +265,10 @@
   hosts: control_plane[0]
   become: true
   tasks:
-    - name: Check current longhorn-frontend Service type
+    - name: Check current longhorn-frontend Service type and nodePort
       ansible.builtin.command: >
         kubectl get service longhorn-frontend -n {{ longhorn_namespace }}
-        -o jsonpath='{.spec.type}'
+        -o jsonpath='{.spec.type} {.spec.ports[0].nodePort}'
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: lh_svc_type
@@ -216,11 +283,11 @@
         kubectl patch service longhorn-frontend -n {{ longhorn_namespace }}
         --type='json'
         -p='[{"op":"replace","path":"/spec/type","value":"NodePort"},
-             {"op":"add","path":"/spec/ports/0/nodePort","value":{{ longhorn_ui_nodeport }}}]'
+             {"op":"add","path":"/spec/ports/0/nodePort","value":{{ longhorn_ui_nodeport | int }}}]'
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: true
       when:
         - longhorn_enabled | default(false) | bool
         - longhorn_ui_nodeport | default(0) | int > 0
-        - lh_svc_type.stdout != "NodePort"
+        - lh_svc_type.stdout != "NodePort " ~ longhorn_ui_nodeport

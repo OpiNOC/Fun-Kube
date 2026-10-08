@@ -31,9 +31,19 @@ def _metrics_server_insecure_tls(body: str) -> str:
     return out
 
 
-# Modifiche applicate ai manifest dopo il download
+def _longhorn_check_replicas(body: str) -> str:
+    # ansible/playbooks/longhorn.yml sostituisce questa riga (ConfigMap
+    # longhorn-storageclass) con le repliche calcolate per il cluster.
+    if body.count('      numberOfReplicas: "3"') != 1:
+        raise ValueError('riga numberOfReplicas: "3" della ConfigMap longhorn-storageclass '
+                         'non trovata (o duplicata): aggiornare longhorn.yml')
+    return body
+
+
+# Modifiche/verifiche applicate ai manifest dopo il download
 PATCHES = {
     "metrics-server/files/components.yaml": _metrics_server_insecure_tls,
+    "longhorn/files/longhorn.yaml": _longhorn_check_replicas,
 }
 
 
