@@ -402,6 +402,16 @@ Al termine dell'installazione:
 
 ---
 
+## Modifiche dopo l'installazione
+
+Rieseguire `./fun-kube up` dopo aver cambiato il `.env` applica le modifiche supportate
+(pool MetalLB, parametri ingress, NodePort, nuovi nodi, nuovi addon). Prima di toccare i
+nodi confronta il `.env` con il cluster e si ferma se cambiano endpoint/VIP, `POD_CIDR`,
+`SERVICE_CIDR`, `NPM_DB_PASSWORD` o `K8S_VERSION` (per quest'ultima: `fun-kube upgrade`).
+Un addon messo a `false` **non** viene disinstallato. Dettagli in `PROJECT.md`.
+
+---
+
 ## Upgrade di Kubernetes
 
 ```bash

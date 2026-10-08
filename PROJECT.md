@@ -51,11 +51,12 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 |-------------------------------|--------------------------------|
 | fun-kube (entry point)        | ✓ auto-bootstrap venv Python   |
 | fun_kube/config.py            | ✓ parsing, validazione, topologia, gap detection NODE_N |
-| fun_kube/preflight.py         | ✓ local + SSH checks           |
+| fun_kube/preflight.py         | ✓ local + SSH checks (nodi nuovi anche su cluster esistente); confronto .env ↔ cluster |
 | fun_kube/runner.py            | ✓ inventory, sequenza playbook (longhorn prima di ingress), Ctrl+C; output addon; longhorn_replicas dinamico |
-| fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP); config_warnings |
+| fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP), upgrade; config_warnings |
+| fun_kube/upgrade.py           | ✓ upgrade kubeadm patch/+1 minor (Test 16-18) — ripresa e mononodo da testare |
 | fun_kube/deps.py              | ✓ check + auto-install tools (kubectl pinnato, Helm 4) |
-| fun_kube/versions.py          | versioni componenti + lista manifest vendored |
+| fun_kube/versions.py          | ✓ versioni componenti, manifest vendored, compatibilità addon ↔ K8s |
 | ansible/roles/common          | ✓ testato                      |
 | ansible/roles/containerd      | ✓ testato (fix config v2.x)    |
 | ansible/roles/kubeadm         | ✓ testato                      |
@@ -64,7 +65,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/cert-manager    | ✓ testato                      |
 | ansible/roles/cert-renewal    | ✓ testato                      |
 | ansible/roles/local-path-provisioner | ✓ testato              |
-| ansible/roles/keepalived      | ✓ testato (Test 4+5)           |
+| ansible/roles/keepalived      | ✓ testato (Test 4+5); health check API server sul VIP (Test 17) |
 | ansible/roles/metallb         | ✓ testato (Test 6)                   |
 | ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE, externalTrafficPolicy:Local (Test 7) |
 | ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node, externalTrafficPolicy:Local (Test 8) |
@@ -254,7 +255,7 @@ Implementazione e bug trovati/fixati:
   da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
   versione sempre risolta da Python (GitHub API)
 
-### Upgrade di Kubernetes (`fun-kube upgrade`) — 2026-10-08 — DA TESTARE
+### Upgrade di Kubernetes (`fun-kube upgrade`) — 2026-10-08 — PARZIALMENTE TESTATO
 
 Design concordato: patch o +1 minor per esecuzione; drain → upgrade → uncordon un nodo
 alla volta; ripresa automatica; snapshot etcd sulla bootstrap; `.env` aggiornato a fine
@@ -271,15 +272,19 @@ upgrade; mononodo/volumi a 1 replica → fermo workload con conferma esplicita.
   lascia un CP con API server giù (utile anche fuori dall'upgrade); reload invece di
   restart al cambio di config
 
-Test da eseguire:
-- **Test 16** — `--dry-run` su cluster 1.35.9: piano corretto, nessuna modifica
-- **Test 17** — failover keepalived: fermare kube-apiserver sul MASTER
-  (`mv /etc/kubernetes/manifests/kube-apiserver.yaml /root/`) → il VIP passa a un altro CP
-  entro ~10s; ripristinare il manifest → il VIP torna
-- **Test 18** — upgrade 1.35.9 → 1.36.5 su HA 3+3 con Longhorn e un workload con PVC
-  (verificare snapshot in `output/backups/`, nessun volume degradato, `.env` aggiornato)
-- **Test 19** — ripresa: interrompere (Ctrl+C) durante i worker, rilanciare
-- **Test 20** — mononodo: conferma col nome del cluster richiesta, upgrade senza drain
+Test:
+- **Test 16 ✓ (2026-10-08)** — `--dry-run` su cluster HA 3 CP 1.35.9: piano corretto
+  (drain, nessun fermo workload, addon allineati), nessuna modifica
+- **Test 17 ✓ (2026-10-08)** — failover keepalived: kube-apiserver fermato sul MASTER
+  (`mv /etc/kubernetes/manifests/kube-apiserver.yaml /root/`) → il VIP passa a un altro CP,
+  `kubectl` via VIP continua a rispondere; manifest ripristinato → il VIP torna
+- **Test 18 ✓ (2026-10-08)** — upgrade 1.35.9 → 1.36.5 su HA **3 CP senza worker**
+  (Calico, cert-manager, metrics-server, MetalLB): tutti i nodi a v1.36.5, tutti i pod su.
+  Confermato che `etcdctl` è disponibile nell'immagine etcd (snapshot pre-upgrade riuscito)
+- **Test 18b** — DA FARE: upgrade su HA 3+3 con Longhorn e un workload con PVC
+  (nessun volume degradato tra un nodo e l'altro, PDB rispettati)
+- **Test 19** — DA FARE: ripresa — interrompere (Ctrl+C) durante l'upgrade, rilanciare
+- **Test 20** — DA FARE: mononodo — conferma col nome del cluster, upgrade senza drain
 
 ### Modifiche su cluster esistente (re-run di `up`) — 2026-10-08
 
@@ -296,7 +301,7 @@ Comportamento di `up` quando il `.env` cambia dopo l'installazione:
 | Primi worker su cluster solo-CP | warning: i CP restano senza taint (comando per ri-applicarlo) |
 | `KEEPALIVED_VIP` / endpoint (anche 1 CP → HA), `POD_CIDR`, `SERVICE_CIDR` | **errore prima di toccare i nodi** — richiede reset + up |
 | `NPM_DB_PASSWORD` | **errore** — procedura ALTER USER nel file di manutenzione |
-| `K8S_VERSION` su nodi già nel cluster | **errore** — Fun-Kube non fa `kubeadm upgrade` |
+| `K8S_VERSION` su nodi già nel cluster | **errore** — usare `fun-kube upgrade --to` |
 | `CONTAINERD_VERSION` su nodi già nel cluster | versione installata mantenuta + warning |
 
 Il confronto `.env` ↔ cluster (`preflight.check_existing_cluster`) usa il kubeconfig
@@ -306,7 +311,7 @@ Se il cluster non è raggiungibile il confronto viene saltato.
 Fix inclusi: il patch diretto delle repliche sulla SC `longhorn` era rifiutato dall'API
 (`parameters` immutabili) → `up` falliva già alla prima installazione con < 3 nodi schedulabili.
 
-### Aggiornamento versioni — 2026-10-08 — DA TESTARE
+### Aggiornamento versioni — 2026-10-08 — PARZIALMENTE TESTATO
 
 | Componente | Versione |
 |---|---|
@@ -322,9 +327,10 @@ Fix inclusi: il patch diretto delle repliche sulla SC `longhorn` era rifiutato d
 | Nginx Proxy Manager / MariaDB | 2.16.0 / 11.4 |
 | Helm sulla bootstrap | 4.x |
 
-Test da eseguire:
-- **Test 11** — HA 3 CP + 3 worker da nodi puliti, tutti gli addon (MetalLB, Longhorn RWX,
-  Traefik LB, DN-essence) → verifica regressione completa
+Test:
+- **Test 11 — parziale (2026-10-08)**: cluster HA 3 CP (senza worker) creato da nodi puliti con
+  le nuove versioni → OK; addon presenti nel cluster: Calico, cert-manager, metrics-server,
+  MetalLB. DA COMPLETARE: worker, Longhorn RWX, Traefik LB, DN-essence
 - **Test 12** — stesso cluster con NPM al posto di Traefik
 - **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
 - **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
@@ -351,6 +357,24 @@ Test da eseguire:
 - Calico: rimosso il download inutilizzato di `custom-resources.yaml`
 
 ---
+
+## Prossimi passi / idee (2026-10-08)
+
+- **Completare i test**: 11 (worker, Longhorn, Traefik, DN-essence), 12-15, 18b, 19, 20
+- **Nuovi componenti** da aggiungere all'installazione (da definire)
+- **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
+  madmin/funkube, rimandato a quel momento)
+- **Disinstallazione addon** (`fun-kube addon uninstall <nome>`): oggi mettere un addon a
+  `false` lo lascia installato. I playbook uninstall di madmin vanno corretti (usano `helm`
+  sui CP, dove non è installato)
+- **Adozione di cluster esistenti** non creati da Fun-Kube (analisi del 2026-10-08):
+  - fattibile solo per cluster kubeadm + Ubuntu + containerd; non per k3s/RKE2/managed
+  - oggi `up` su un cluster esterno è pericoloso: riapplica Calico (doppia CNI se diversa),
+    rigenera la config di containerd, imposta gli hostname, installa keepalived sul VIP
+    anche se c'è già un altro LB (kube-vip/HAProxy), riapplica cert-manager/metrics-server
+  - proposta: `fun-kube adopt --scan` in sola lettura (rapporto + bozza di `.env`), poi
+    `.env` che indica per ogni componente se è gestito da Fun-Kube o lasciato com'è;
+    primi obiettivi: diagnose, upgrade, aggiunta worker
 
 ## Struttura del progetto
 
@@ -492,7 +516,13 @@ CIDR da tenere non sovrapposti: `POD_CIDR`, `SERVICE_CIDR`, `METALLB_IP_POOL`.
 ./fun-kube reset [.env]       # distrugge il cluster (kubeadm reset)
   --yes                       # salta conferma
 
-./fun-kube diagnose [.env]    # stato nodi (kubelet, k8s, disk, ram)
+./fun-kube diagnose [.env]    # stato nodi (kubelet, k8s, disk, ram) + addon
+
+./fun-kube upgrade --to vX.Y.Z [.env]   # upgrade Kubernetes (patch o +1 minor)
+  --dry-run                   # solo controlli e piano
+  --yes / -y                  # salta la conferma (non basta con fermo workload)
+  --allow-downtime            # accetta il fermo workload senza conferma interattiva
+  --ignore-addon-compat       # procede con addon non testati sulla versione target
 ```
 
 Prima del provisioning viene sempre mostrato un riepilogo con:
@@ -511,7 +541,9 @@ Prima del provisioning viene sempre mostrato un riepilogo con:
 0. auto-install    python3-venv → .venv, ansible, kubectl, helm, community.general
 1. check-deps      verifica che tutti i tool siano disponibili
 2. config          parsing .env, validazione CIDR, rilevamento topologia
-3. preflight       checks su tutti i nodi (skip se cluster già inizializzato)
+2b. cluster check  se il cluster esiste: confronto .env ↔ cluster (endpoint, CIDR,
+                   password NPM → errore; nodi/taint/repliche Longhorn → warning)
+3. preflight       nodi nuovi: check completi; nodi già nel cluster: solo SSH/sudo
 4. provisioning    playbook Ansible in sequenza:
      bootstrap.yml → [keepalived.yml] → kubeadm-init.yml
      → [control-plane-join.yml] → [worker-join.yml]
