@@ -62,6 +62,10 @@ metadata:
   namespace: {{ npm_namespace }}
 spec:
   replicas: 1
+  # Volume RWO: con RollingUpdate il nuovo pod resterebbe bloccato in attesa
+  # del volume ancora montato dal vecchio (es. al cambio di immagine).
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: npm-mariadb
@@ -72,8 +76,12 @@ spec:
     spec:
       containers:
       - name: mariadb
-        image: mariadb:10.6
+        image: mariadb:{{ mariadb_image_version }}
         env:
+        # Aggiorna le tabelle di sistema se il datadir viene da una versione
+        # precedente (es. cluster esistenti creati con mariadb 10.6).
+        - name: MARIADB_AUTO_UPGRADE
+          value: "1"
         - name: MARIADB_ROOT_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -137,14 +145,14 @@ spec:
     spec:
       initContainers:
       - name: prepare-folders
-        image: busybox
+        image: busybox:1.37
         command: ['sh', '-c', 'mkdir -p /mnt/npm/data /mnt/npm/letsencrypt']
         volumeMounts:
         - name: npm-storage
           mountPath: /mnt/npm
       containers:
       - name: npm
-        image: jc21/nginx-proxy-manager:latest
+        image: jc21/nginx-proxy-manager:{{ npm_image_version }}
         env:
         - name: DB_MYSQL_HOST
           value: npm-mariadb
@@ -189,12 +197,13 @@ kind: Service
 metadata:
   name: nginx-proxy-manager
   namespace: {{ npm_namespace }}
+{% if ingress_service_type == "loadbalancer" and npm_lb_ip %}
+  annotations:
+    metallb.io/loadBalancerIPs: "{{ npm_lb_ip }}"
+{% endif %}
 spec:
 {% if ingress_service_type == "loadbalancer" %}
   type: LoadBalancer
-{% if npm_lb_ip %}
-  loadBalancerIP: "{{ npm_lb_ip }}"
-{% endif %}
   externalTrafficPolicy: Local
 {% else %}
   type: NodePort

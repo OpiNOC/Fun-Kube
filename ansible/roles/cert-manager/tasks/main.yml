@@ -1,14 +1,16 @@
 # tasks file for cert-manager
+# Manifest vendored in files/ (versione in fun_kube/versions.py).
 ---
-- name: Download cert-manager manifest
-  ansible.builtin.get_url:
-    url: "https://github.com/cert-manager/cert-manager/releases/download/{{ cert_manager_version }}/cert-manager.yaml"
+- name: Copy cert-manager manifest
+  ansible.builtin.copy:
+    src: cert-manager.yaml
     dest: /tmp/cert-manager.yaml
     mode: '0644'
-    force: false
 
+# Server-side apply: il CRD clusterissuers supera ~300KB, oltre il limite di
+# 262KB dell'annotation last-applied usata dal client-side apply.
 - name: Apply cert-manager manifest
-  ansible.builtin.command: kubectl apply -f /tmp/cert-manager.yaml
+  ansible.builtin.command: kubectl apply --server-side --force-conflicts -f /tmp/cert-manager.yaml
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   changed_when: true

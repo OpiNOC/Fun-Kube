@@ -15,6 +15,7 @@ from typing import List
 
 from rich.console import Console
 
+from . import versions
 from .config import ClusterConfig
 
 console = Console()
@@ -34,10 +35,8 @@ _PLAYBOOK_DIR = _ANSIBLE_DIR / "playbooks"
 
 def run_core(cluster: ClusterConfig, debug: bool = False) -> None:
     k8s_version_resolved = _resolve_k8s_version(cluster.k8s_version)
-    longhorn_version_resolved = _resolve_longhorn_version(cluster.longhorn.version) if cluster.longhorn.enabled else ""
-    metallb_version_resolved = _resolve_metallb_version(cluster.metallb.version) if cluster.metallb.enabled else ""
     inventory_path = _write_inventory(cluster)
-    extra_vars = _build_extra_vars(cluster, k8s_version_resolved, longhorn_version_resolved, metallb_version_resolved)
+    extra_vars = _build_extra_vars(cluster, k8s_version_resolved)
 
     playbooks = _build_playbook_sequence(cluster)
 
@@ -298,7 +297,7 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
             "-" * 40,
             "",
             f"IP pool:  {cluster.metallb.ip_pool}",
-            f"Versione: {cluster.metallb.version or 'risolto da GitHub API'}",
+            f"Versione: {versions.METALLB_VERSION}",
             "",
             "Verifica:",
             "  kubectl get ipaddresspool -n metallb-system",
@@ -317,7 +316,7 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
             "-" * 40,
             "",
             f"Namespace:  longhorn-system",
-            f"Versione:   {cluster.longhorn.version or 'risolto da GitHub API'}",
+            f"Versione:   {versions.LONGHORN_VERSION}",
             f"UI:         {lh_ui}",
             f"RWX:        {'abilitato (StorageClass: longhorn-rwx)' if cluster.longhorn.rwx else 'disabilitato'}",
             "",
@@ -404,42 +403,6 @@ def _resolve_k8s_version(k8s_version: str) -> str:
     return version
 
 
-def _resolve_metallb_version(metallb_version: str) -> str:
-    if metallb_version:
-        v = metallb_version if metallb_version.startswith("v") else f"v{metallb_version}"
-        console.print(f"  [green]✓[/]  metallb version: {v}")
-        return v
-    console.print("  [cyan]▶[/]  resolving latest metallb version...")
-    import json as _json
-    req = urllib.request.Request(
-        "https://api.github.com/repos/metallb/metallb/releases/latest",
-        headers={"Accept": "application/vnd.github+json"},
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = _json.loads(resp.read().decode())
-    version = data["tag_name"]
-    console.print(f"  [green]✓[/]  metallb version: {version}")
-    return version
-
-
-def _resolve_longhorn_version(longhorn_version: str) -> str:
-    if longhorn_version:
-        v = longhorn_version if longhorn_version.startswith("v") else f"v{longhorn_version}"
-        console.print(f"  [green]✓[/]  longhorn version: {v}")
-        return v
-    console.print("  [cyan]▶[/]  resolving latest longhorn version...")
-    import json as _json
-    req = urllib.request.Request(
-        "https://api.github.com/repos/longhorn/longhorn/releases/latest",
-        headers={"Accept": "application/vnd.github+json"},
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = _json.loads(resp.read().decode())
-    version = data["tag_name"]
-    console.print(f"  [green]✓[/]  longhorn version: {version}")
-    return version
-
-
 # ---------------------------------------------------------------------------
 # Inventory
 # ---------------------------------------------------------------------------
@@ -481,8 +444,10 @@ def _write_inventory(cluster: ClusterConfig) -> Path:
 # Extra vars per Ansible
 # ---------------------------------------------------------------------------
 
-def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhorn_version_resolved: str = "", metallb_version_resolved: str = "") -> dict:
+def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict:
     return {
+        # Versioni componenti (fun_kube/versions.py)
+        **versions.ansible_vars(),
         "cluster_name": cluster.cluster_name,
         "topology": cluster.topology,
         "k8s_version": cluster.k8s_version,
@@ -494,8 +459,6 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhor
         "first_cp_ip": cluster.first_cp.ip,
         "first_cp_hostname": cluster.first_cp.hostname,
         "untaint_cp": cluster.untaint_cp,
-        "cert_manager_version": cluster.cert_manager_version,
-        "local_path_provisioner_version": cluster.local_path_version or "v0.0.30",
         "local_node": cluster.local_node,
         "all_cp_ips": [n.ip for n in cluster.control_planes],
         "api_server_extra_sans": cluster.api_server_extra_sans,
@@ -508,14 +471,12 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str, longhor
         # MetalLB
         "metallb_enabled": cluster.metallb.enabled,
         "metallb_ip_pool": cluster.metallb.ip_pool,
-        "metallb_version": metallb_version_resolved,
         # Longhorn
         "longhorn_enabled": cluster.longhorn.enabled,
         "longhorn_replicas": cluster.longhorn_replicas,
         "longhorn_rwx": cluster.longhorn.rwx,
         "longhorn_ui_nodeport": cluster.longhorn.ui_nodeport,
         "longhorn_namespace": "longhorn-system",
-        "longhorn_version": longhorn_version_resolved,
         # Ingress
         "ingress_enabled": cluster.ingress.enabled,
         "ingress_type": cluster.ingress.type,

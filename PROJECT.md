@@ -54,7 +54,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun_kube/preflight.py         | ✓ local + SSH checks           |
 | fun_kube/runner.py            | ✓ inventory, sequenza playbook (longhorn prima di ingress), Ctrl+C; output addon; longhorn_replicas dinamico |
 | fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP); config_warnings |
-| fun_kube/deps.py              | ✓ check + auto-install tools   |
+| fun_kube/deps.py              | ✓ check + auto-install tools (kubectl pinnato, Helm 4) |
+| fun_kube/versions.py          | versioni componenti + lista manifest vendored |
 | ansible/roles/common          | ✓ testato                      |
 | ansible/roles/containerd      | ✓ testato (fix config v2.x)    |
 | ansible/roles/kubeadm         | ✓ testato                      |
@@ -105,7 +106,7 @@ cp .env.example .env
 Al primo avvio lo script:
 1. Installa `python3-venv` via apt se mancante
 2. Crea `.venv/` locale con typer, rich, python-dotenv
-3. Installa ansible via apt, kubectl via download, helm via get-helm-3
+3. Installa ansible via apt, kubectl via download (stessa versione di `K8S_VERSION` default), helm 4 via get-helm-4
 4. Installa la collection ansible `community.general`
 5. Esegue il provisioning
 
@@ -253,6 +254,31 @@ Implementazione e bug trovati/fixati:
   da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
   versione sempre risolta da Python (GitHub API)
 
+### Aggiornamento versioni — 2026-10-08 — DA TESTARE
+
+| Componente | Versione |
+|---|---|
+| Kubernetes (default, `K8S_VERSION`) | v1.35.9 |
+| containerd.io (repo Docker) | 2.3.6 |
+| Calico | v3.32.2 |
+| cert-manager | v1.21.2 |
+| metrics-server | v0.9.0 |
+| local-path-provisioner | v0.0.37 |
+| MetalLB | v0.16.0 |
+| Longhorn | v1.12.1 |
+| Traefik chart (default, `TRAEFIK_CHART_VERSION`) | 41.6.1 (Traefik v3.7) |
+| Nginx Proxy Manager / MariaDB | 2.16.0 / 11.4 |
+| Helm sulla bootstrap | 4.x |
+
+Test da eseguire:
+- **Test 11** — HA 3 CP + 3 worker da nodi puliti, tutti gli addon (MetalLB, Longhorn RWX,
+  Traefik LB, DN-essence) → verifica regressione completa
+- **Test 12** — stesso cluster con NPM al posto di Traefik
+- **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
+- **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
+- **Test 15** — upgrade da cluster esistente creato con le versioni precedenti
+  (Calico 3.28→3.32, cert-manager 1.17→1.21, Longhorn 1.11→1.12, MariaDB 10.6→11.4)
+
 ### Bug fix (backport da madmin/funkube + review) — 2026-10-08
 - `kubeadm`: il fallback senza versione usava `ansible_failed_result` (definito solo in `rescue:`)
   e non scattava mai → ora `register` + `when: _k8s_install_strict is failed`; unhold dei
@@ -285,7 +311,10 @@ Fun-Kube/
 │   ├── config.py             # parsing .env, validazione, topologia
 │   ├── deps.py               # check + auto-install tool bootstrap
 │   ├── preflight.py          # preflight checks (local + SSH)
-│   └── runner.py             # inventory + sequenza playbook Ansible
+│   ├── runner.py             # inventory + sequenza playbook Ansible
+│   └── versions.py           # versioni componenti (unica fonte di verità)
+├── scripts/
+│   └── vendor-manifests.py   # riscarica i manifest vendored in roles/*/files/
 ├── .env.example              # template (committato)
 ├── .env                      # config locale (gitignored)
 ├── .venv/                    # venv Python (gitignored, generato al primo run)
@@ -355,7 +384,7 @@ SSH_USER=root
 SSH_KEY_PATH=~/.ssh/id_rsa
 
 # Kubernetes
-K8S_VERSION=latest          # o es. "1.31.0"
+K8S_VERSION=v1.35.9         # vuoto = default di versions.py, 'latest' = ultima stabile
 POD_CIDR=172.16.0.0/16
 SERVICE_CIDR=10.96.0.0/12
 CNI=calico
@@ -476,9 +505,37 @@ solo se il file esistente è diverso da quello atteso (idempotente).
 `kubectl apply` fallisce su CRD > 262KB per limite annotation.
 Soluzione: `kubectl apply --server-side --force-conflicts`.
 
-**Versione Kubernetes "latest"**
-Risolta una volta sola in Python da `https://dl.k8s.io/release/stable.txt`
+**Versioni e manifest vendored**
+Tutte le versioni sono in `fun_kube/versions.py` e arrivano ad Ansible come extra-vars
+(`versions.ansible_vars()`). I manifest kubectl (Calico, cert-manager, metrics-server,
+local-path, MetalLB, Longhorn) sono in `ansible/roles/*/files/`, generati da
+`scripts/vendor-manifests.py` (che applica anche le patch, es. `--kubelet-insecure-tls`
+su metrics-server). `CERT_MANAGER_VERSION`, `LOCAL_PATH_VERSION`, `METALLB_VERSION`,
+`LONGHORN_VERSION` in `.env` sono ignorate con warning.
+`K8S_VERSION=latest` viene risolta una volta sola in Python da `https://dl.k8s.io/release/stable.txt`
 e passata ad Ansible come `k8s_version_resolved`.
+
+**Calico >= 3.30: CRD separati**
+I CRD sono in `operator-crds.yaml`, separato da `tigera-operator.yaml`: vanno applicati prima,
+server-side (il CRD `installations` supera 1MB). L'apply dell'`Installation` ha retry perché i CRD
+appena creati possono non essere ancora Established.
+
+**cert-manager: server-side apply**
+Dalla v1.21 il CRD `clusterissuers` supera ~300KB (oltre il limite di 262KB dell'annotation
+last-applied del client-side apply) → `kubectl apply --server-side --force-conflicts`.
+
+**Traefik chart >= 41: `service.spec.type`**
+Il tipo di Service va in `service.spec.type` (default del chart: `LoadBalancer`); il vecchio
+`service.type` viene ignorato senza errori. L'IP fisso MetalLB usa l'annotation
+`metallb.io/loadBalancerIPs` (`spec.loadBalancerIP` è deprecato), anche per NPM.
+
+**Longhorn: upgrade automatico**
+Se installato, l'apply del nuovo manifest avviene solo per upgrade di patch o +1 minor
+(supportati da Longhorn); downgrade e salti di più minor falliscono con istruzioni.
+
+**MariaDB (NPM): Recreate + auto-upgrade**
+La Deployment usa `strategy: Recreate` (volume RWO: con RollingUpdate il nuovo pod resterebbe
+bloccato al cambio immagine) e `MARIADB_AUTO_UPGRADE=1` per migrare datadir da 10.6 a 11.4.
 
 **Calico: "no matching resources found" al wait dei pod**
 Il task `Wait for Calico pods to be running` esegue `kubectl wait --for=condition=Ready pod -l k8s-app=calico-node -n calico-system --timeout=300s` subito dopo l'apply del manifest dell'operatore Calico. In quel momento l'operatore non ha ancora riconciliato e i pod `calico-node` non esistono ancora → `kubectl wait` fallisce con `error: no matching resources found` (non "pod non ready", ma "nessun pod trovato").

@@ -3,6 +3,8 @@ Verifica e installazione automatica dei tool richiesti sulla macchina bootstrap.
 """
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -10,10 +12,12 @@ import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from rich.console import Console
 from rich.table import Table
+
+from . import versions
 
 console = Console()
 
@@ -79,9 +83,10 @@ def _ensure_ansible() -> None:
 def _ensure_kubectl() -> None:
     if shutil.which("kubectl"):
         return
-    console.print("  [cyan]▶[/]  installazione kubectl...")
-    with urllib.request.urlopen("https://dl.k8s.io/release/stable.txt", timeout=15) as r:
-        version = r.read().decode().strip()
+    # Stessa versione del cluster di default: l'ultima stable potrebbe uscire dal
+    # version skew supportato (kubectl ±1 minor rispetto all'API server).
+    version = versions.K8S_VERSION
+    console.print(f"  [cyan]▶[/]  installazione kubectl {version}...")
     arch_raw = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
     # dpkg usa amd64/arm64, dl.k8s.io usa la stessa nomenclatura
     url = f"https://dl.k8s.io/release/{version}/bin/linux/{arch_raw}/kubectl"
@@ -99,10 +104,10 @@ def _ensure_kubectl() -> None:
 def _ensure_helm() -> None:
     if shutil.which("helm"):
         return
-    console.print("  [cyan]▶[/]  installazione Helm...")
+    console.print("  [cyan]▶[/]  installazione Helm 4...")
     with tempfile.NamedTemporaryFile(delete=False, suffix=".sh", mode="w") as tmp:
         tmp_path = tmp.name
-    with urllib.request.urlopen("https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3", timeout=15) as r:
+    with urllib.request.urlopen("https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4", timeout=15) as r:
         Path(tmp_path).write_bytes(r.read())
     subprocess.run(["bash", tmp_path], check=True, env={**__import__("os").environ, "VERIFY_CHECKSUM": "true"})
     Path(tmp_path).unlink(missing_ok=True)
@@ -124,6 +129,18 @@ def _ensure_ansible_collection(collection: str) -> None:
         check=True,
     )
     console.print(f"  [green]✓[/]  {collection} installata")
+
+
+def kubectl_client_minor() -> Optional[int]:
+    """Minor version del kubectl installato (es. 35 per v1.35.9), None se non rilevabile."""
+    try:
+        out = subprocess.run(
+            ["kubectl", "version", "--client", "-o", "json"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        return int(re.sub(r"\D", "", json.loads(out)["clientVersion"]["minor"]))
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

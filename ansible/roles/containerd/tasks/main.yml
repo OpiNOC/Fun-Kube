@@ -22,12 +22,39 @@
     filename: docker
   become: true
 
-- name: Install containerd.io
+- name: Update apt cache
   ansible.builtin.apt:
-    name: containerd.io
-    state: present
     update_cache: true
   become: true
+
+# containerd_version (fun_kube/versions.py) è un prefisso: si installa l'ultima
+# revisione apt disponibile per quella versione (es. 2.3.6 → 2.3.6-1~ubuntu.24.04~noble).
+- name: Resolve exact containerd.io apt version
+  ansible.builtin.shell: |
+    set -o pipefail
+    apt-cache madison containerd.io | awk '{print $3}' | grep "^{{ containerd_version }}-" | sort -V | tail -1
+  args:
+    executable: /bin/bash
+  register: _containerd_exact_ver
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Fail if containerd version is not available
+  ansible.builtin.fail:
+    msg: >-
+      containerd.io {{ containerd_version }} non disponibile nel repo Docker per
+      {{ ansible_distribution_release }}. Versioni disponibili:
+      apt-cache madison containerd.io
+  when: _containerd_exact_ver.stdout | trim == ""
+
+- name: Install containerd.io (pinned)
+  ansible.builtin.apt:
+    name: "containerd.io={{ _containerd_exact_ver.stdout | trim }}"
+    state: present
+    allow_downgrade: true
+  become: true
+  notify: Restart containerd
 
 - name: Ensure /etc/containerd directory exists
   ansible.builtin.file:

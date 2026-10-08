@@ -1,12 +1,12 @@
 # tasks file for local-path-provisioner
 # Storage leggero per cluster mononodo — crea PV come directory su disco locale.
 ---
-- name: Download local-path-provisioner manifest
-  ansible.builtin.get_url:
-    url: "https://raw.githubusercontent.com/rancher/local-path-provisioner/{{ local_path_provisioner_version }}/deploy/local-path-storage.yaml"
+# Manifest vendored in files/ (versione in fun_kube/versions.py).
+- name: Copy local-path-provisioner manifest
+  ansible.builtin.copy:
+    src: local-path-storage.yaml
     dest: /tmp/local-path-storage.yaml
     mode: '0644'
-    force: false
 
 - name: Wait for API server to be reachable
   ansible.builtin.command: kubectl version --output=json

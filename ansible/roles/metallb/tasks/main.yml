@@ -21,12 +21,12 @@
   when: metallb_installed_version.stdout == metallb_version
   run_once: true
 
-- name: Download MetalLB manifest
-  ansible.builtin.get_url:
-    url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
+# Manifest vendored in files/ (versione in fun_kube/versions.py).
+- name: Copy MetalLB manifest
+  ansible.builtin.copy:
+    src: metallb-native.yaml
     dest: /tmp/metallb-native.yaml
     mode: '0644'
-    force: true
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
   when: metallb_installed_version.stdout != metallb_version

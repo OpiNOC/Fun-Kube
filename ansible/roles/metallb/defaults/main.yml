@@ -1,5 +1,4 @@
 # defaults file for metallb
-# Nota: metallb_version è risolto e passato da runner.py come extra_var.
-# Questo valore è un fallback di emergenza e non dovrebbe mai essere usato.
+# La versione è definita in fun_kube/versions.py (manifest vendored in files/)
 ---
-metallb_version: "v0.14.9"
+metallb_version: ""

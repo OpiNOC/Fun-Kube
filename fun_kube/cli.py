@@ -12,7 +12,7 @@ from rich.table import Table
 
 from . import config as cfg_module
 from .config import ConfigError
-from . import preflight, runner, deps
+from . import preflight, runner, deps, versions
 from .deps import DepsError
 
 app = typer.Typer(
@@ -64,6 +64,8 @@ def up(
     except ConfigError as e:
         err.print(f"\n[red]Errore di configurazione:[/]\n{e}")
         raise typer.Exit(1)
+
+    _check_kubectl_skew(cluster)
 
     # --- Riepilogo e conferma ---
     _print_cluster_summary(cluster)
@@ -598,6 +600,20 @@ def _dn_essence_section(kube_env: dict, cluster) -> str:
     return "\n".join(lines)
 
 
+def _check_kubectl_skew(cluster) -> None:
+    """Aggiunge un warning se kubectl sulla bootstrap è fuori dal version skew (±1 minor)."""
+    import re
+    m = re.match(r"v?1\.(\d+)", cluster.k8s_version)
+    client_minor = deps.kubectl_client_minor()
+    if not m or client_minor is None:
+        return
+    if abs(int(m.group(1)) - client_minor) > 1:
+        cluster.config_warnings.append(
+            f"kubectl sulla bootstrap è 1.{client_minor}, il cluster sarà {cluster.k8s_version}: "
+            f"fuori dal version skew supportato (±1 minor). Aggiornare /usr/local/bin/kubectl."
+        )
+
+
 def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
     from .config import ClusterConfig
 
@@ -646,6 +662,11 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
     console.print(table)
     console.print()
 
+    console.print(
+        f"  Componenti   : containerd {versions.CONTAINERD_VERSION}, Calico {versions.CALICO_VERSION}, "
+        f"cert-manager {versions.CERT_MANAGER_VERSION}, metrics-server {versions.METRICS_SERVER_VERSION}"
+    )
+
     # Dettagli rete
     console.print(f"  Pod CIDR     : {cluster.pod_cidr}")
     console.print(f"  Service CIDR : {cluster.service_cidr}")
@@ -660,7 +681,7 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
     if addons:
         console.print(f"  Addon        : {', '.join(addons)}")
         if cluster.metallb.enabled:
-            mlb_ver = cluster.metallb.version or "latest (GitHub API)"
+            mlb_ver = versions.METALLB_VERSION
             console.print(f"    MetalLB versione  : {mlb_ver}")
             console.print(f"    MetalLB IP pool   : {cluster.metallb.ip_pool}")
         if cluster.ingress.enabled:
@@ -693,7 +714,7 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
                 if ing.npm_db_password == "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW":
                     console.print(f"    [yellow]⚠  NPM_DB_PASSWORD è il valore di default — cambiarlo in .env![/]")
         if cluster.longhorn.enabled:
-            lh_ver = cluster.longhorn.version or "latest (GitHub API)"
+            lh_ver = versions.LONGHORN_VERSION
             lh_rwx = "sì" if cluster.longhorn.rwx else "no"
             if cluster.longhorn.ui_nodeport:
                 lh_ui = f"http://{cluster.api_endpoint}:{cluster.longhorn.ui_nodeport}"

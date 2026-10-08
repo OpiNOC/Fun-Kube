@@ -1,3 +1,4 @@
 # defaults file for containerd
+# La versione è definita in fun_kube/versions.py
 ---
-containerd_version: latest
+containerd_version: ""

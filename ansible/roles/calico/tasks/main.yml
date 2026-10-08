@@ -1,15 +1,25 @@
 # tasks file for calico
+# Manifest vendored in files/ (versione in fun_kube/versions.py).
+# Da Calico 3.30 i CRD sono in operator-crds.yaml, separati dall'operatore:
+# vanno applicati prima. Server-side apply: i CRD superano il limite di 262KB
+# dell'annotation last-applied del client-side apply.
 ---
-- name: Download Calico operator manifest
-  ansible.builtin.get_url:
-    url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"
-    dest: /tmp/tigera-operator.yaml
+- name: Copy Calico manifests
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/tmp/{{ item }}"
     mode: '0644'
+  loop:
+    - operator-crds.yaml
+    - tigera-operator.yaml
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
 
-- name: Apply Calico operator manifest
-  ansible.builtin.command: kubectl apply --server-side --force-conflicts -f /tmp/tigera-operator.yaml
+- name: Apply Calico CRDs and operator
+  ansible.builtin.command: kubectl apply --server-side --force-conflicts -f /tmp/{{ item }}
+  loop:
+    - operator-crds.yaml
+    - tigera-operator.yaml
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   delegate_to: "{{ first_cp_hostname }}"
@@ -26,7 +36,8 @@
     spec:
       calicoNetwork:
         ipPools:
-        - cidr: {{ pod_cidr }}
+        - name: default-ipv4-ippool
+          cidr: {{ pod_cidr }}
           encapsulation: VXLAN
           natOutgoing: Enabled
           nodeSelector: all()
@@ -37,7 +48,12 @@
     KUBECONFIG: /etc/kubernetes/admin.conf
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
-  changed_when: true
+  register: _calico_installation
+  # i CRD appena creati possono non essere ancora Established
+  until: _calico_installation.rc == 0
+  retries: 6
+  delay: 10
+  changed_when: "'unchanged' not in _calico_installation.stdout"
 
 - name: Wait for calico-node DaemonSet to be created by operator
   ansible.builtin.shell: |

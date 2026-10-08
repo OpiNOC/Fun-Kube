@@ -55,6 +55,34 @@ Se non definisci worker, i nodi control-plane vengono detaintati automaticamente
 
 ---
 
+## Versioni
+
+Le versioni sono fissate in [`fun_kube/versions.py`](fun_kube/versions.py) (unica fonte di verità).
+I manifest applicati con kubectl sono vendored nel repo (`ansible/roles/*/files/`): l'installazione
+è riproducibile e non dipende da download dei manifest a runtime.
+
+| Componente | Versione |
+|---|---|
+| Kubernetes (default, `K8S_VERSION`) | v1.35.9 |
+| containerd.io (repo Docker) | 2.3.6 |
+| Calico | v3.32.2 |
+| cert-manager | v1.21.2 |
+| metrics-server | v0.9.0 |
+| local-path-provisioner | v0.0.37 |
+| MetalLB | v0.16.0 |
+| Longhorn | v1.12.1 |
+| Traefik chart (default, `TRAEFIK_CHART_VERSION`) | 41.6.1 (Traefik v3.7) |
+| Nginx Proxy Manager / MariaDB | 2.16.0 / 11.4 |
+| Helm sulla bootstrap | 4.x |
+
+Solo `K8S_VERSION` (`latest` = ultima stabile upstream), `TRAEFIK_CHART_VERSION` (chart >= 41) e
+`DN_ESSENCE_VERSION` sono configurabili in `.env`.
+
+Per aggiornare un componente: cambiare la versione in `versions.py`, eseguire
+`./scripts/vendor-manifests.py` e committare `versions.py` insieme ai manifest aggiornati.
+
+---
+
 ## Requisiti
 
 ### Bootstrap machine
@@ -389,7 +417,10 @@ Fun-Kube/
 │   ├── config.py                 # parsing .env, validazione, topologia
 │   ├── preflight.py              # check pre-installazione sui nodi
 │   ├── runner.py                 # inventory + sequenza playbook + output
-│   └── deps.py                   # verifica e auto-install tool bootstrap
+│   ├── deps.py                   # verifica e auto-install tool bootstrap
+│   └── versions.py               # versioni di tutti i componenti
+├── scripts/
+│   └── vendor-manifests.py       # riscarica i manifest vendored
 └── ansible/
     ├── playbooks/
     │   ├── bootstrap.yml              # common + containerd + kubeadm su tutti i nodi

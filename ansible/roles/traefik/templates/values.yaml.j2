@@ -15,17 +15,14 @@ providers:
 
 service:
   enabled: true
-  type: {{ "LoadBalancer" if ingress_service_type == "loadbalancer" else "NodePort" }}
-{% if ingress_service_type == "loadbalancer" %}
-  spec:
-{% if traefik_lb_ip %}
-    loadBalancerIP: "{{ traefik_lb_ip }}"
+{% if ingress_service_type == "loadbalancer" and traefik_lb_ip %}
+  annotations:
+    metallb.io/loadBalancerIPs: "{{ traefik_lb_ip }}"
 {% endif %}
-    externalTrafficPolicy: Local
-{% else %}
+  # Chart >= 41: il tipo va in service.spec.type (service.type viene ignorato)
   spec:
+    type: {{ "LoadBalancer" if ingress_service_type == "loadbalancer" else "NodePort" }}
     externalTrafficPolicy: Local
-{% endif %}
 
 ports:
   web:

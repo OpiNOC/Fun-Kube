@@ -1,2 +1,3 @@
+# La versione è definita in fun_kube/versions.py (manifest vendored in files/)
 ---
-local_path_provisioner_version: "v0.0.30"
+local_path_provisioner_version: ""

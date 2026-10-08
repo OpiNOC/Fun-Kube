@@ -12,6 +12,8 @@ from typing import List, Literal, Tuple
 
 from dotenv import dotenv_values
 
+from . import versions
+
 
 class ConfigError(Exception):
     pass
@@ -34,8 +36,7 @@ class KeepalivedConfig:
 @dataclass
 class MetalLBConfig:
     enabled: bool
-    ip_pool: str   # es. "10.0.0.200-10.0.0.220"
-    version: str   # es. "v0.14.9" — vuoto = risolto da GitHub
+    ip_pool: str   # es. "10.0.0.200-10.0.0.220" o "10.0.0.192/28"
 
 
 @dataclass
@@ -64,7 +65,6 @@ class LonghornConfig:
     enabled: bool
     rwx: bool
     ui_nodeport: int  # 0 = disabilitato, altrimenti porta NodePort (es. 30080)
-    version: str
 
 
 @dataclass
@@ -95,8 +95,6 @@ class ClusterConfig:
     topology: Topology
     output_dir: Path
     log_level: str
-    cert_manager_version: str
-    local_path_version: str
     api_server_extra_sans: List[str]
     local_node: bool
     cluster_timezone: str
@@ -176,7 +174,7 @@ def load(env_file: Path) -> ClusterConfig:
         nodes=nodes,
         ssh_user=ssh_user,
         ssh_key_path=ssh_key_path,
-        k8s_version=env.get("K8S_VERSION", "latest"),
+        k8s_version=(env.get("K8S_VERSION") or "").strip() or versions.K8S_VERSION,
         pod_cidr=_require(env, "POD_CIDR"),
         service_cidr=env.get("SERVICE_CIDR", "10.96.0.0/12"),
         cni=env.get("CNI", "calico").lower(),
@@ -184,14 +182,12 @@ def load(env_file: Path) -> ClusterConfig:
         metallb=MetalLBConfig(
             enabled=_bool(env, "METALLB_ENABLED"),
             ip_pool=env.get("METALLB_IP_POOL", ""),
-            version=env.get("METALLB_VERSION", "").strip(),
         ),
         ingress=_parse_ingress(env),
         longhorn=LonghornConfig(
             enabled=_bool(env, "LONGHORN_ENABLED"),
             rwx=_bool(env, "LONGHORN_RWX"),
             ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "31080") or "31080"),
-            version=env.get("LONGHORN_VERSION", "").strip(),
         ),
         dn_essence=DnEssenceConfig(
             enabled=_bool(env, "DN_ESSENCE_ENABLED", default=True),
@@ -201,8 +197,6 @@ def load(env_file: Path) -> ClusterConfig:
         topology=topology,
         output_dir=Path(env.get("OUTPUT_DIR", "./output")),
         log_level=env.get("LOG_LEVEL", "info").lower(),
-        cert_manager_version=env.get("CERT_MANAGER_VERSION", "v1.17.2"),
-        local_path_version=env.get("LOCAL_PATH_VERSION", "").strip(),
         api_server_extra_sans=extra_sans,
         local_node=local_node,
         cluster_timezone=env.get("CLUSTER_TIMEZONE", "Europe/Rome"),
@@ -210,7 +204,18 @@ def load(env_file: Path) -> ClusterConfig:
     )
 
     cfg.config_warnings.extend(_validate(cfg))
+    cfg.config_warnings.extend(
+        f"{key} in .env viene ignorata: la versione è fissata nel repo "
+        f"(fun_kube/versions.py, manifest vendored)."
+        for key in _OBSOLETE_VERSION_VARS if (env.get(key) or "").strip()
+    )
     return cfg
+
+
+# Versioni non più configurabili: i manifest sono vendored nel repo.
+_OBSOLETE_VERSION_VARS = (
+    "CERT_MANAGER_VERSION", "LOCAL_PATH_VERSION", "METALLB_VERSION", "LONGHORN_VERSION",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +329,7 @@ def _parse_ingress(env: dict) -> IngressConfig:
         enabled=enabled,
         type=ingress_type,
         service_type=service_type,
-        traefik_chart_version=env.get("TRAEFIK_CHART_VERSION", "").strip(),
+        traefik_chart_version=(env.get("TRAEFIK_CHART_VERSION") or "").strip() or versions.TRAEFIK_CHART_VERSION,
         traefik_lb_ip=env.get("TRAEFIK_LB_IP", "").strip(),
         traefik_http_nodeport=int(env.get("TRAEFIK_HTTP_NODEPORT", "30080") or "30080"),
         traefik_https_nodeport=int(env.get("TRAEFIK_HTTPS_NODEPORT", "30443") or "30443"),
