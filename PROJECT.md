@@ -283,7 +283,12 @@ Test:
   Confermato che `etcdctl` è disponibile nell'immagine etcd (snapshot pre-upgrade riuscito)
 - **Test 18b** — DA FARE: upgrade su HA 3+3 con Longhorn e un workload con PVC
   (nessun volume degradato tra un nodo e l'altro, PDB rispettati)
-- **Test 19** — DA FARE: ripresa — interrompere (Ctrl+C) durante l'upgrade, rilanciare
+- **Test 19** — IN CORSO (2026-10-12): Ctrl+C durante `kubeadm upgrade apply` su cp1.
+  Scoperto che il task è async: Ctrl+C ferma ansible ma **kubeadm prosegue in background**
+  sul nodo (API non raggiungibile per qualche minuto). Aggiunto: blocco se `kubeadm` è
+  ancora in esecuzione sul nodo (`pgrep -x kubeadm`), messaggi di Ctrl+C e "cluster non
+  raggiungibile" che spiegano di attendere, piano di ripresa che mostra "kubelet (control
+  plane già a ...)" per il primo CP
 - **Test 20** — DA FARE: mononodo — conferma col nome del cluster, upgrade senza drain
 
 ### Modifiche su cluster esistente (re-run di `up`) — 2026-10-08

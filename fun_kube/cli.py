@@ -215,7 +215,13 @@ def upgrade(
     try:
         backup_dir = upg.execute(cluster, plan, env_file, debug=debug)
     except KeyboardInterrupt:
-        err.print("\n[yellow]Upgrade interrotto (Ctrl+C).[/] Rilanciare lo stesso comando per riprendere.")
+        err.print(
+            "\n[yellow]Upgrade interrotto (Ctrl+C).[/]\n"
+            "  Se era in corso kubeadm upgrade su un nodo, kubeadm [bold]continua in background[/]\n"
+            "  e l'API può non rispondere per qualche minuto. Prima di rilanciare attendere\n"
+            "  che termini (ssh <nodo> 'pgrep -a -x kubeadm' senza output), poi:\n"
+            f"  ./fun-kube upgrade --to {plan.target} {env_file}"
+        )
         raise typer.Exit(130)
     except (runner.RunnerError, upg.UpgradeError) as e:
         err.print(
@@ -248,6 +254,8 @@ def _print_upgrade_plan(cluster, plan) -> None:
     for i, n in enumerate(order, 1):
         if n.hostname not in plan.nodes_todo and not (i == 1 and not plan.resume):
             action = "[dim]già aggiornato — saltato[/]"
+        elif i == 1 and plan.resume:
+            action = f"kubelet (control plane già a {plan.target})"
         elif i == 1:
             action = "kubeadm upgrade apply + kubelet"
         else:

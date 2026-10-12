@@ -163,7 +163,11 @@ def analyze(cluster: ClusterConfig, target: str, ignore_addon_compat: bool = Fal
     rc, cc, err = _kubectl(kc, "get", "cm", "kubeadm-config", "-n", "kube-system",
                            "-o", "jsonpath={.data.ClusterConfiguration}")
     if rc != 0:
-        raise UpgradeError(f"Cluster non raggiungibile ({err}).")
+        raise UpgradeError(
+            f"Cluster non raggiungibile ({err}).\n"
+            "  Se un upgrade precedente è stato interrotto durante kubeadm upgrade, kubeadm sta\n"
+            "  probabilmente ancora lavorando su un control-plane: attendere qualche minuto."
+        )
     m = re.search(r"^kubernetesVersion:\s*(\S+)", cc, re.M)
     if not m:
         raise UpgradeError("kubernetesVersion non trovata in kubeadm-config.")

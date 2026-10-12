@@ -5,6 +5,26 @@
 # kubectl → restart kubelet → Ready → uncordon → controlli di salute.
 # I comandi kubectl verso il cluster partono dalla bootstrap (kubeconfig via VIP).
 ---
+# kubeadm upgrade gira come job async sul nodo: un Ctrl+C su fun-kube ferma
+# ansible-playbook ma NON kubeadm, che prosegue in background. Rilanciare in
+# quella finestra avvierebbe un secondo kubeadm upgrade in parallelo.
+# -x: nome del processo esatto (non il testo della riga di comando, che
+# troverebbe anche shell o script che contengono la parola "kubeadm").
+- name: Check that no kubeadm process is running on the node
+  ansible.builtin.command: pgrep -a -x kubeadm
+  register: _up_kubeadm_running
+  changed_when: false
+  failed_when: false
+
+- name: Fail if kubeadm is still running (interrupted upgrade still in progress)
+  ansible.builtin.fail:
+    msg: >-
+      kubeadm è ancora in esecuzione su {{ inventory_hostname }}
+      ({{ _up_kubeadm_running.stdout_lines | first }}): probabilmente un upgrade
+      interrotto con Ctrl+C che sta proseguendo in background. Attendere che termini
+      (ssh {{ inventory_hostname }} 'pgrep -a -x kubeadm' senza output) e rilanciare.
+  when: _up_kubeadm_running.rc == 0
+
 - name: Get installed kubelet version
   ansible.builtin.command: dpkg-query -W -f=${Version} kubelet
   register: _up_kubelet
