@@ -406,7 +406,9 @@ Test:
   apiserver/calico/ippools/tiers tutti Available, `kubectl get tiers` OK, API
   `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`). Da verificare su
   installazione da zero (Test 13)
-- **Load worker2/worker3 ~3** costante nel lab dopo i test (altri nodi < 0.6): da indagare
+- **Load worker2/worker3 ~3**: causa trovata (processi bloccati su NFS dopo un reset) → nuovo
+  `reset` con arresto pulito dei workload e `--reboot`. DA TESTARE: reset del cluster HA con
+  workload su PVC RWX, poi verificare che nessun nodo abbia processi in stato D
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
 - **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
   madmin/funkube, rimandato a quel momento)
@@ -560,8 +562,9 @@ CIDR da tenere non sovrapposti: `POD_CIDR`, `SERVICE_CIDR`, `METALLB_IP_POOL`.
 ./fun-kube check-deps         # verifica + installa tool bootstrap
   --verbose                   # mostra versioni
 
-./fun-kube reset [.env]       # distrugge il cluster (kubeadm reset)
+./fun-kube reset [.env]       # distrugge il cluster (arresto workload + kubeadm reset)
   --yes                       # salta conferma
+  --reboot                    # riavvia i nodi a fine reset
 
 ./fun-kube diagnose [.env]    # stato nodi (kubelet, k8s, disk, ram) + addon
 
@@ -705,6 +708,16 @@ Ogni run può essere rieseguito senza danni:
 - containerd: rigenera config solo se diverso
 - swap: skip se già disabilitato
 - untaint: ok se taint già rimosso
+
+**Reset: arresto pulito dei workload e processi bloccati**
+Nel lab, dopo un reset, due worker avevano load ~3 costante: processi in stato D (`nginx` del
+workload su volume RWX e il thread NFS del kernel) appesi da ore a uno share-manager Longhorn
+(`nfs: server 10.106.107.181 not responding`) del cluster distrutto. Lo smontaggio lazy
+nascondeva il mount ma il processo restava bloccato fino al riavvio.
+Ora `reset` (`fun_kube/reset.py`): (1) se il cluster risponde, cordon di tutti i nodi,
+cancellazione dei pod dei namespace applicativi e attesa che non restino mount NFS/Longhorn di
+kubelet sui nodi; (2) reset dei nodi con `umount -f` prima del lazy; (3) segnala i nodi con
+processi in stato D e consiglia il riavvio; `--reboot` riavvia i nodi a fine reset.
 
 **Reset con volumi Longhorn montati**
 `kubeadm reset` si bloccava indefinitamente sui worker con volumi Longhorn (iSCSI/NFS) ancora montati in `/var/lib/kubelet`.

@@ -281,9 +281,12 @@ def _print_upgrade_plan(cluster, plan) -> None:
 def reset(
     env_file: Path = typer.Argument(Path(".env")),
     yes: bool = typer.Option(False, "--yes", "-y", help="Salta la conferma interattiva"),
+    reboot: bool = typer.Option(False, "--reboot",
+                                help="Riavvia i nodi a fine reset (stato pulito garantito)"),
     debug: bool = typer.Option(False, "--debug"),
 ) -> None:
-    """Distrugge il cluster: kubeadm reset su tutti i nodi + pulizia."""
+    """Distrugge il cluster: arresto pulito dei workload, kubeadm reset su tutti i nodi + pulizia."""
+    from . import reset as rst
 
     console.print(Panel(
         "[bold red]Fun-Kube RESET[/] — Questa operazione è distruttiva e irreversibile",
@@ -300,47 +303,36 @@ def reset(
         console.print(f"\n  Cluster : [cyan]{cluster.cluster_name}[/]")
         console.print(f"  Nodi    : {', '.join(n.hostname for n in cluster.nodes)}")
         console.print("\n  [yellow]Verranno eseguiti kubeadm reset + pulizia su tutti i nodi.[/]")
+        if reboot:
+            console.print("  [yellow]A fine reset i nodi verranno riavviati.[/]")
         confirm = typer.prompt("\nDigita il nome del cluster per confermare", default="")
         if confirm != cluster.cluster_name:
             console.print("[yellow]Reset annullato.[/]")
             raise typer.Exit(0)
 
-    reset_script = (
-        # Stop kubelet first to release CSI/iSCSI/NFS mounts (e.g. Longhorn volumes)
-        # that would otherwise cause `kubeadm reset` to hang indefinitely.
-        "sudo systemctl stop kubelet 2>/dev/null || true; "
-        "sudo systemctl stop iscsid 2>/dev/null || true; "
-        "for m in $(grep -E 'kubelet|longhorn|csi' /proc/mounts 2>/dev/null | awk '{print $2}' | sort -r); do "
-        "  sudo umount -f -l \"$m\" 2>/dev/null || true; "
-        "done; "
-        "sudo kubeadm reset -f 2>/dev/null || true; "
-        "sudo rm -rf /etc/kubernetes /var/lib/etcd /var/lib/kubelet "
-        "         /etc/cni/net.d /opt/cni/bin /root/.kube; "
-        "sudo iptables -F && sudo iptables -t nat -F && "
-        "sudo iptables -t mangle -F && sudo iptables -X 2>/dev/null || true; "
-        "sudo ip link delete cni0 2>/dev/null || true; "
-        "sudo ip link delete flannel.1 2>/dev/null || true; "
-        "sudo ip link delete calico.1 2>/dev/null || true"
-    )
+    console.print("\n[bold]1/3  Arresto pulito dei workload[/]")
+    rst.stop_workloads(cluster)
 
-    import subprocess as sp
-    for node in cluster.nodes:
-        console.print(f"  [cyan]▶[/]  reset {node.hostname} ({node.ip})...")
-        if cluster.local_node:
-            result = sp.run(["bash", "-c", reset_script], text=True)
-        else:
-            result = sp.run([
-                "ssh", "-i", str(cluster.ssh_key_path),
-                "-o", "StrictHostKeyChecking=no",
-                f"{cluster.ssh_user}@{node.ip}",
-                reset_script,
-            ], text=True)
-        if result.returncode == 0:
-            console.print(f"  [green]✓[/]  {node.hostname} pulito")
-        else:
-            console.print(f"  [yellow]⚠[/]  {node.hostname}: exit {result.returncode} (non bloccante)")
+    console.print("\n[bold]2/3  Reset dei nodi[/]")
+    rst.reset_nodes(cluster)
 
-    console.print("\n[bold green]Reset completato.[/] I nodi sono pronti per un nuovo provisioning.")
+    console.print("\n[bold]3/3  Controllo processi bloccati[/]")
+    stuck = rst.check_stuck_processes(cluster)
+    if not stuck:
+        console.print("  [green]✓[/]  nessun processo bloccato")
+
+    if reboot:
+        rst.reboot_nodes(cluster, [n.hostname for n in cluster.nodes])
+        console.print("\n[bold green]Reset completato.[/] Nodi in riavvio: attendere che tornino "
+                      "raggiungibili prima del prossimo up.")
+    elif stuck:
+        console.print(
+            f"\n[bold yellow]Reset completato, ma {', '.join(stuck)} hanno processi bloccati[/]\n"
+            "  (tipicamente I/O su un volume NFS di un cluster che non esiste più): restano appesi\n"
+            "  fino al riavvio e alzano il load. Riavviare quei nodi, oppure rilanciare con --reboot."
+        )
+    else:
+        console.print("\n[bold green]Reset completato.[/] I nodi sono pronti per un nuovo provisioning.")
 
 
 @app.command()
