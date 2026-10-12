@@ -335,7 +335,8 @@ Test:
   (LoadBalancer), DN-essence → tutto Ready/Running, `kubectl top` OK, repliche Longhorn = 2,
   PVC RWO e RWX Bound, NPM 2.16 + MariaDB 11.4 su Longhorn OK, keepalived iface auto-detect OK.
   **Bug trovato**: cp1 registrato con InternalIP = VIP keepalived (vedi Note tecniche,
-  "IP del nodo esplicito") → fix e reinstallazione. Traefik ancora da verificare.
+  "IP del nodo esplicito"); API server ed etcd di cp1 annunciavano invece l'IP corretto →
+  correzione verificabile con `up` sul cluster esistente. Traefik ancora da verificare.
 - **Test 12** — stesso cluster con NPM al posto di Traefik
 - **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
 - **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
@@ -640,7 +641,8 @@ esplicito kubelet (InternalIP), kubeadm (advertise address di API server ed etcd
 Fix: l'inventory passa `node_ip` (IP del `.env`) a ogni host → `/etc/default/kubelet`
 (`--node-ip`), `kubeadm init/join --apiserver-advertise-address`, Calico
 `nodeAddressAutodetectionV4: kubernetes: NodeInternalIP`. Il controllo `.env` ↔ cluster
-segnala i nodi con InternalIP diverso; per i CP già installati serve reinstallare.
+segnala i nodi con InternalIP diverso: `up` corregge kubelet; se su un CP anche l'API server
+annuncia l'IP sbagliato (annotation kubeadm sul pod kube-apiserver) serve reinstallare.
 
 **Idempotenza**
 Ogni run può essere rieseguito senza danni:

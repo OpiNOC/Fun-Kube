@@ -325,17 +325,27 @@ def check_existing_cluster(cluster: ClusterConfig) -> Tuple[List[str], List[str]
             internal = next((a["address"] for a in obj.get("status", {}).get("addresses", [])
                              if a.get("type") == "InternalIP"), None)
             if internal and internal != n.ip:
+                vip_note = " (è il VIP keepalived)" if internal == cluster.keepalived.vip else ""
+                # Sui CP conta anche l'indirizzo annunciato da API server/etcd (fissato a
+                # init/join): kubelet si corregge con --node-ip, l'advertise address no.
+                advertise = ""
                 if n.role == "control-plane":
+                    rc, adv = kubectl(
+                        "get", "pod", f"kube-apiserver-{n.hostname}", "-n", "kube-system", "-o",
+                        "jsonpath={.metadata.annotations.kubeadm\\.kubernetes\\.io/"
+                        "kube-apiserver\\.advertise-address\\.endpoint}")
+                    advertise = adv.strip() if rc == 0 else ""
+                if advertise and not advertise.startswith(f"{n.ip}:"):
                     warnings.append(
-                        f"{n.hostname}: InternalIP {internal} diverso dall'IP del .env {n.ip}"
-                        f"{' (è il VIP keepalived)' if internal == cluster.keepalived.vip else ''}.\n"
-                        "    up corregge kubelet (--node-ip), ma API server ed etcd di questo CP\n"
-                        "    possono annunciare ancora l'IP sbagliato: reinstallazione consigliata."
+                        f"{n.hostname}: InternalIP {internal}{vip_note} e API server che annuncia "
+                        f"{advertise}, diversi dall'IP del .env {n.ip}.\n"
+                        "    up corregge kubelet (--node-ip) ma non l'advertise address di API server\n"
+                        "    ed etcd (fissato al kubeadm init/join): reinstallazione consigliata."
                     )
                 else:
                     warnings.append(
-                        f"{n.hostname}: InternalIP {internal} diverso dall'IP del .env {n.ip}: "
-                        "up lo corregge (kubelet --node-ip)."
+                        f"{n.hostname}: InternalIP {internal}{vip_note} diverso dall'IP del .env "
+                        f"{n.ip}: up lo corregge (kubelet --node-ip, riavvio di kubelet)."
                     )
 
         removed = sorted(set(live) - {n.hostname for n in cluster.nodes})
