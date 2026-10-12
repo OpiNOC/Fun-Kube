@@ -359,6 +359,10 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
     if cluster.untaint_cp:
         playbooks.append("untaint-cp.yml")
 
+    # Dopo untaint-cp: sui cluster senza worker i pod dell'API server Calico
+    # devono poter girare sui control-plane.
+    playbooks.append("calico-apiserver.yml")
+
     playbooks.append("metrics-server.yml")
     playbooks.append("cert-manager.yml")
     playbooks.append("cert-renewal.yml")

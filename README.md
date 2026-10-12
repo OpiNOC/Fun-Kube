@@ -33,7 +33,7 @@ Se non definisci worker, i nodi control-plane vengono detaintati automaticamente
 
 **Cluster core** (sempre):
 - containerd, kubelet, kubeadm, kubectl
-- Calico CNI
+- Calico CNI (con API server Calico: `kubectl get tiers`, risorse `projectcalico.org/v3`)
 - metrics-server (`kubectl top nodes/pods` funziona subito)
 - cert-manager
 - Rinnovo automatico certificati (systemd timer mensile su ogni CP)
@@ -476,6 +476,7 @@ Fun-Kube/
     │   ├── control-plane-join.yml     # join CP aggiuntivi (HA only)
     │   ├── worker-join.yml            # join worker nodes
     │   ├── calico.yml                 # CNI
+    │   ├── calico-apiserver.yml       # API server Calico
     │   ├── untaint-cp.yml             # rimozione taint (se nessun worker)
     │   ├── metrics-server.yml
     │   ├── cert-manager.yml

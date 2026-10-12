@@ -402,8 +402,8 @@ Test:
 ## Prossimi passi / idee (2026-10-08)
 
 - **Completare i test**: 13 e 20 (mononodo)
-- **Calico APIServer**: `tigerastatus tiers` Degraded ("Waiting for Tigera API server") — decidere se
-  installare l'`APIServer` come nella configurazione upstream
+- **Calico APIServer**: aggiunto (2026-10-12) — DA TESTARE sul cluster del lab (`up`, poi
+  `kubectl get tigerastatus` tutto ok, `kubectl get tiers`), poi su installazione da zero
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
 - **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
   madmin/funkube, rimandato a quel momento)
@@ -446,6 +446,7 @@ Fun-Kube/
 │   │   ├── control-plane-join.yml  # join CP aggiuntivi (HA)
 │   │   ├── worker-join.yml         # join workers
 │   │   ├── calico.yml
+│   │   ├── calico-apiserver.yml    # API server Calico (dopo untaint-cp)
 │   │   ├── untaint-cp.yml          # mononodo/single-cp senza worker
 │   │   ├── metrics-server.yml
 │   │   ├── cert-manager.yml
@@ -590,7 +591,7 @@ Prima del provisioning viene sempre mostrato un riepilogo con:
 4. provisioning    playbook Ansible in sequenza:
      bootstrap.yml → [keepalived.yml] → kubeadm-init.yml
      → [control-plane-join.yml] → [worker-join.yml]
-     → calico.yml → [untaint-cp.yml]
+     → calico.yml → [untaint-cp.yml] → calico-apiserver.yml
      → metrics-server.yml → cert-manager.yml → cert-renewal.yml
      → [local-path-provisioner.yml]  (solo single-node)
      → bootstrap-kubeconfig.yml
@@ -641,6 +642,16 @@ su metrics-server). `CERT_MANAGER_VERSION`, `LOCAL_PATH_VERSION`, `METALLB_VERSI
 `LONGHORN_VERSION` in `.env` sono ignorate con warning.
 `K8S_VERSION=latest` viene risolta una volta sola in Python da `https://dl.k8s.io/release/stable.txt`
 e passata ad Ansible come `k8s_version_resolved`.
+
+**Calico API server**
+Le installazioni Calico via operatore includono l'`APIServer` di default (espone
+`projectcalico.org/v3` a kubectl e serve al controller dei tier); Fun-Kube non lo creava e
+`tigerastatus tiers` restava Degraded ("Waiting for Tigera API server to be ready").
+Ora `calico-apiserver.yml` (dopo `untaint-cp`, perché sui cluster senza worker i pod devono
+girare sui CP) crea `APIServer default`, attende `tigerastatus apiserver` Available e nessun
+componente Calico Degraded; altrimenti `up` si ferma (API aggregata non disponibile = errori
+di discovery di kubectl). `diagnose` mostra lo stato di ogni componente Calico; `upgrade`
+rifiuta di partire con componenti Calico degradati.
 
 **Calico >= 3.30: CRD separati**
 I CRD sono in `operator-crds.yaml`, separato da `tigera-operator.yaml`: vanno applicati prima,

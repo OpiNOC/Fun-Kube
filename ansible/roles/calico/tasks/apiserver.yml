@@ -1,0 +1,52 @@
+# Calico API server (componente di default delle installazioni via operatore):
+# espone projectcalico.org/v3 a kubectl e serve al controller dei tier Calico
+# (senza, tigerastatus "tiers" resta Degraded: "Waiting for Tigera API server").
+# Eseguito da calico-apiserver.yml DOPO untaint-cp: sui cluster senza worker i
+# pod devono poter girare sui control-plane.
+#
+# È un'API aggregata: se non è disponibile kubectl stampa errori di discovery e
+# la cancellazione dei namespace può bloccarsi. Per questo up si ferma se non
+# diventa Available entro il timeout.
+---
+- name: Create Calico APIServer
+  ansible.builtin.shell: |
+    cat <<EOF | kubectl apply -f -
+    apiVersion: operator.tigera.io/v1
+    kind: APIServer
+    metadata:
+      name: default
+    spec: {}
+    EOF
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: _calico_apiserver
+  changed_when: "'unchanged' not in _calico_apiserver.stdout"
+
+- name: Wait for Calico API server to be Available (tigerastatus)
+  ansible.builtin.command: >
+    kubectl get tigerastatus apiserver
+    -o jsonpath='{.status.conditions[?(@.type=="Available")].status} {.status.conditions[?(@.type=="Progressing")].status}'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: _calico_apiserver_status
+  until: _calico_apiserver_status.rc == 0 and _calico_apiserver_status.stdout == 'True False'
+  retries: 60
+  delay: 10
+  changed_when: false
+
+# Nessun componente Calico degradato (calico, apiserver, ippools, tiers, ...).
+- name: Wait for no degraded Calico component
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get tigerastatus -o jsonpath='{range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Degraded")].status}{"\n"}{end}' | grep '=True$' || true
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: _calico_degraded
+  until: _calico_degraded.rc == 0 and _calico_degraded.stdout | trim == ''
+  retries: 30
+  delay: 10
+  changed_when: false

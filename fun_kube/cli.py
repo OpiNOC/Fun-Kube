@@ -461,6 +461,9 @@ def _print_addon_status(kube_env: dict, cluster) -> None:
     namespaces = set(out.splitlines())
 
     sections = []
+    calico = _calico_section(kube_env)
+    if calico:
+        sections.append(calico)
     if cluster.keepalived.enabled:
         sections.append(_keepalived_section(cluster))
     if "metallb-system" in namespaces:
@@ -492,6 +495,34 @@ def _pod_summary(kube_env: dict, namespace: str) -> str:
     running = sum(1 for l in lines if "Running" in l)
     color = "green" if running == total else "yellow" if running > 0 else "red"
     return f"[{color}]{running}/{total} Running[/]"
+
+
+def _calico_section(kube_env: dict) -> str:
+    """Stato dei componenti Calico gestiti dall'operatore (tigerastatus)."""
+    import json as _json
+    rc, out, _ = _kctl(["get", "tigerastatus", "-o", "json"], kube_env)
+    if rc != 0 or not out:
+        return ""
+    try:
+        items = _json.loads(out).get("items", [])
+    except ValueError:
+        return ""
+    rc, ver, _ = _kctl(["get", "clusterinformation", "default",
+                        "-o", "jsonpath={.spec.calicoVersion}"], kube_env)
+    lines = [f"[bold]Calico[/]  {ver if rc == 0 and ver else ''}"]
+    for it in sorted(items, key=lambda i: i["metadata"]["name"]):
+        conds = {c["type"]: c for c in it.get("status", {}).get("conditions", [])}
+        degraded = conds.get("Degraded", {}).get("status") == "True"
+        available = conds.get("Available", {}).get("status") == "True"
+        if degraded:
+            msg = conds["Degraded"].get("message", "")[:90]
+            lines.append(f"  [red]{it['metadata']['name']}: degraded[/] — {msg}")
+        elif available or not conds.get("Available"):
+            lines.append(f"  [green]{it['metadata']['name']}[/]: ok")
+        else:
+            lines.append(f"  [yellow]{it['metadata']['name']}: non disponibile[/]")
+    lines.append(f"  Pods: {_pod_summary(kube_env, 'calico-system')}")
+    return "\n".join(lines)
 
 
 def _keepalived_section(cluster) -> str:

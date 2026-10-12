@@ -234,6 +234,18 @@ def analyze(cluster: ClusterConfig, target: str, ignore_addon_compat: bool = Fal
     if bad:
         raise UpgradeError(f"Pod di kube-system non pronti: {', '.join(bad)}.")
 
+    # --- Calico: nessun componente degradato ---
+    rc, out, _ = _kubectl(kc, "get", "tigerastatus", "-o",
+                          "jsonpath={range .items[*]}{.metadata.name}={.status.conditions"
+                          "[?(@.type==\"Degraded\")].status}{\"\\n\"}{end}")
+    if rc == 0:
+        degraded_calico = [l.split("=")[0] for l in out.splitlines() if l.endswith("=True")]
+        if degraded_calico:
+            raise UpgradeError(
+                f"Componenti Calico degradati: {', '.join(degraded_calico)}.\n"
+                "  Dettagli: kubectl get tigerastatus  (risolvere prima dell'upgrade)."
+            )
+
     # --- Addon: allineati al repo e compatibili con il target ---
     installed = _installed_addons(kc)
     misaligned = [f"{a} {v} (repo: {_PINNED[a]})" for a, v in installed.items()

@@ -1,0 +1,10 @@
+# Calico API server — dopo untaint-cp (vedi roles/calico/tasks/apiserver.yml)
+---
+- name: Deploy Calico API server
+  hosts: control_plane[0]
+  become: true
+  tasks:
+    - name: Apply Calico API server
+      ansible.builtin.include_role:
+        name: calico
+        tasks_from: apiserver
