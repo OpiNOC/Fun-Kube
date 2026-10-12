@@ -337,6 +337,12 @@ Test:
   **Bug trovato**: cp1 registrato con InternalIP = VIP keepalived (vedi Note tecniche,
   "IP del nodo esplicito"); API server ed etcd di cp1 annunciavano invece l'IP corretto →
   correzione verificabile con `up` sul cluster esistente. Traefik ancora da verificare.
+- **Fix node_ip su cluster esistente ✓ (2026-10-12)** — `up` dopo il fix: cp1 InternalIP
+  corretto (.21), IP Calico corretti su tutti i nodi, nessun pod riavviato
+- **Aggiunta worker ✓ (2026-10-12)** — worker3 aggiunto via `up`: preflight completo solo sul
+  nodo nuovo, join OK, tutti i DaemonSet presenti; repliche Longhorn 2 → 3 su `longhorn`
+  (ricreata da longhorn-manager dalla ConfigMap: log "Updated the default Longhorn
+  StorageClass") e `longhorn-rwx`; PVC esistenti Bound (restano a 2 repliche, come previsto)
 - **Test 12** — stesso cluster con NPM al posto di Traefik
 - **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
 - **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
@@ -366,7 +372,7 @@ Test:
 
 ## Prossimi passi / idee (2026-10-08)
 
-- **Completare i test**: 11 (worker, Longhorn, Traefik, DN-essence), 12-15, 18b, 19, 20
+- **Completare i test**: Traefik (11), 13-15, 18b, 19, 20, blocco cambio VIP
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
 - **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
   madmin/funkube, rimandato a quel momento)
