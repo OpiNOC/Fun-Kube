@@ -360,7 +360,9 @@ Test:
   StorageClass") e `longhorn-rwx`; PVC esistenti Bound (restano a 2 repliche, come previsto)
 - **Test 12** — stesso cluster con NPM al posto di Traefik
 - **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
-- **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
+- **Test 14 ✓ (2026-10-12)** — re-run `up -y` su cluster HA 3+3 allineato (Longhorn, Traefik,
+  MetalLB, DN-essence, workload su PVC): nessun pod ricreato (UID invariati) né riavviato,
+  quasi tutti i play `changed=0`; Longhorn ora salta l'apply (versione letta dalla label)
 - **Test 15 ✓ (2026-10-12)**: cluster creato con il commit b31232b (K8s 1.35.4,
   Calico 3.28, cert-manager 1.17, MetalLB 0.15, Longhorn 1.11, Traefik chart 39), poi `up`
   con main. Trovati: (1) attese `kubectl wait pod --all` appese sui pod vecchi durante il
@@ -399,7 +401,7 @@ Test:
 
 ## Prossimi passi / idee (2026-10-08)
 
-- **Completare i test**: 13 e 20 (mononodo), 14 (idempotenza: secondo `up` senza modifiche)
+- **Completare i test**: 13 e 20 (mononodo)
 - **Calico APIServer**: `tigerastatus tiers` Degraded ("Waiting for Tigera API server") — decidere se
   installare l'`APIServer` come nella configurazione upstream
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
