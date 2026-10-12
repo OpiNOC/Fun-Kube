@@ -26,6 +26,12 @@
   run_once: true
   changed_when: true
 
+# nodeAddressAutodetectionV4: usa l'InternalIP del nodo (= --node-ip di kubelet)
+# invece dell'auto-detect "first-found", che sui CP può scegliere il VIP keepalived.
+# Un solo metodo è ammesso: gli altri sono azzerati esplicitamente (null = rimuovi)
+# perché l'operatore scrive firstFound: true nello spec dei cluster esistenti e
+# apply fonderebbe i due metodi (Installation invalida).
+# (Niente commenti dentro il blocco shell: gli apostrofi rompono il parsing di Ansible.)
 - name: Apply Calico Installation with custom pod CIDR
   ansible.builtin.shell: |
     cat <<EOF | kubectl apply -f -
@@ -35,9 +41,12 @@
       name: default
     spec:
       calicoNetwork:
-        # Usa l'InternalIP del nodo (= --node-ip di kubelet) invece dell'auto-detect
-        # "first-found", che sui CP può scegliere il VIP keepalived.
         nodeAddressAutodetectionV4:
+          firstFound: null
+          interface: null
+          skipInterface: null
+          canReach: null
+          cidrs: null
           kubernetes: NodeInternalIP
         ipPools:
         - name: default-ipv4-ippool
@@ -58,6 +67,20 @@
   retries: 6
   delay: 10
   changed_when: "'unchanged' not in _calico_installation.stdout"
+
+# Garanzia atomica (una sola richiesta, nessuna finestra in cui l'operatore
+# possa reinserire il default): un solo metodo di autodetection IPv4.
+# Ripara anche cluster in cui l'Installation è già invalida per due metodi.
+- name: Ensure a single node address autodetection method (NodeInternalIP)
+  ansible.builtin.command: >
+    kubectl patch installation default --type=merge
+    -p '{"spec":{"calicoNetwork":{"nodeAddressAutodetectionV4":{"firstFound":null,"interface":null,"skipInterface":null,"canReach":null,"cidrs":null,"kubernetes":"NodeInternalIP"}}}}'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  register: _calico_autodetect
+  changed_when: "'no change' not in _calico_autodetect.stdout"
 
 - name: Wait for calico-node DaemonSet to be created by operator
   ansible.builtin.shell: |

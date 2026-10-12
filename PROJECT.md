@@ -352,7 +352,13 @@ Test:
 - **Test 12** — stesso cluster con NPM al posto di Traefik
 - **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
 - **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
-- **Test 15** — upgrade da cluster esistente creato con le versioni precedenti
+- **Test 15** — IN CORSO (2026-10-12): cluster creato con il commit b31232b (K8s 1.35.4,
+  Calico 3.28, cert-manager 1.17, MetalLB 0.15, Longhorn 1.11, Traefik chart 39), poi `up`
+  con main. Trovati: (1) attese `kubectl wait pod --all` appese sui pod vecchi durante il
+  rollout (MetalLB) → rollout status / tigerastatus; (2) Installation Calico invalida per due
+  metodi di autodetection → fix sopra. Inoltre `reset` lascia i pacchetti k8s installati: il
+  codice vecchio non riusciva a scendere di versione (bug del fallback, già corretto in main)
+- **Test 15 (originale)** — upgrade da cluster esistente creato con le versioni precedenti
   (Calico 3.28→3.32, cert-manager 1.17→1.21, Longhorn 1.11→1.12, MariaDB 10.6→11.4)
 
 ### Bug fix (backport da madmin/funkube + review) — 2026-10-08
@@ -652,7 +658,10 @@ esplicito kubelet (InternalIP), kubeadm (advertise address di API server ed etcd
 (cp1 InternalIP = VIP). Quando il VIP si sposta, l'indirizzo del nodo punta a un altro CP.
 Fix: l'inventory passa `node_ip` (IP del `.env`) a ogni host → `/etc/default/kubelet`
 (`--node-ip`), `kubeadm init/join --apiserver-advertise-address`, Calico
-`nodeAddressAutodetectionV4: kubernetes: NodeInternalIP`. Il controllo `.env` ↔ cluster
+`nodeAddressAutodetectionV4: kubernetes: NodeInternalIP` (gli altri metodi sono azzerati
+esplicitamente + patch merge atomica: sui cluster esistenti l'operatore aveva scritto
+`firstFound: true` nello spec e `kubectl apply` fondeva i due metodi → Installation invalida,
+"no more than one node address autodetection method", osservato nel Test 15). Il controllo `.env` ↔ cluster
 segnala i nodi con InternalIP diverso: `up` corregge kubelet; se su un CP anche l'API server
 annuncia l'IP sbagliato (annotation kubeadm sul pod kube-apiserver) serve reinstallare.
 
