@@ -1,0 +1,11 @@
+# handlers file for kubeadm
+---
+# Solo se il nodo è già nel cluster: prima di init/join kubelet non ha ancora
+# una configurazione e il restart non serve.
+- name: Restart kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: true
+  become: true
+  when: _k8s_joined.stat.exists | default(false)

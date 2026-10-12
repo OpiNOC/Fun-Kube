@@ -316,6 +316,28 @@ def check_existing_cluster(cluster: ClusterConfig) -> Tuple[List[str], List[str]
                 "    kubectl taint nodes -l node-role.kubernetes.io/control-plane "
                 "node-role.kubernetes.io/control-plane=:NoSchedule"
             )
+        # InternalIP diverso dall'IP del .env: tipicamente il VIP keepalived scelto
+        # dall'auto-detect sui CP di cluster creati prima del fix node_ip.
+        for n in cluster.nodes:
+            obj = live.get(n.hostname)
+            if not obj:
+                continue
+            internal = next((a["address"] for a in obj.get("status", {}).get("addresses", [])
+                             if a.get("type") == "InternalIP"), None)
+            if internal and internal != n.ip:
+                if n.role == "control-plane":
+                    warnings.append(
+                        f"{n.hostname}: InternalIP {internal} diverso dall'IP del .env {n.ip}"
+                        f"{' (è il VIP keepalived)' if internal == cluster.keepalived.vip else ''}.\n"
+                        "    up corregge kubelet (--node-ip), ma API server ed etcd di questo CP\n"
+                        "    possono annunciare ancora l'IP sbagliato: reinstallazione consigliata."
+                    )
+                else:
+                    warnings.append(
+                        f"{n.hostname}: InternalIP {internal} diverso dall'IP del .env {n.ip}: "
+                        "up lo corregge (kubelet --node-ip)."
+                    )
+
         removed = sorted(set(live) - {n.hostname for n in cluster.nodes})
         if removed:
             warnings.append(

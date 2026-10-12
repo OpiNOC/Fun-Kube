@@ -107,6 +107,19 @@
     - kubectl
   become: true
 
+# IP del nodo esplicito: altrimenti kubelet sceglie da solo un indirizzo
+# dell'interfaccia e sui CP può prendere il VIP keepalived. Il drop-in kubeadm
+# di kubelet legge KUBELET_EXTRA_ARGS da /etc/default/kubelet.
+- name: Set kubelet node IP
+  ansible.builtin.copy:
+    dest: /etc/default/kubelet
+    content: |
+      # Generato da Fun-Kube
+      KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+    mode: '0644'
+  become: true
+  notify: Restart kubelet
+
 - name: Enable kubelet service
   ansible.builtin.systemd:
     name: kubelet

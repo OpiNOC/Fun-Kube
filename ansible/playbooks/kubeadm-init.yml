@@ -19,6 +19,7 @@
       ansible.builtin.command: >
         kubeadm init
         --control-plane-endpoint "{{ api_endpoint }}:6443"
+        --apiserver-advertise-address "{{ node_ip }}"
         --pod-network-cidr "{{ pod_cidr }}"
         --service-cidr "{{ service_cidr }}"
         --kubernetes-version "{{ k8s_version_resolved }}"

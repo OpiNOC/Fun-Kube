@@ -412,11 +412,14 @@ def _write_inventory(cluster: ClusterConfig) -> Path:
 
     lines.append("[control_plane]")
     for n in cluster.control_planes:
+        # node_ip: IP del nodo dal .env, passato esplicitamente a kubelet/kubeadm/Calico.
+        # Senza, l'auto-detect può scegliere il VIP keepalived (aggiunto all'interfaccia
+        # prima del kubeadm init) come IP del nodo.
         if cluster.local_node:
-            lines.append(f"{n.hostname} ansible_connection=local")
+            lines.append(f"{n.hostname} ansible_connection=local node_ip={n.ip}")
         else:
             lines.append(
-                f"{n.hostname} ansible_host={n.ip} "
+                f"{n.hostname} ansible_host={n.ip} node_ip={n.ip} "
                 f"ansible_user={cluster.ssh_user} "
                 f"ansible_ssh_private_key_file={cluster.ssh_key_path}"
             )
@@ -425,7 +428,7 @@ def _write_inventory(cluster: ClusterConfig) -> Path:
         lines += ["", "[workers]"]
         for n in cluster.workers:
             lines.append(
-                f"{n.hostname} ansible_host={n.ip} "
+                f"{n.hostname} ansible_host={n.ip} node_ip={n.ip} "
                 f"ansible_user={cluster.ssh_user} "
                 f"ansible_ssh_private_key_file={cluster.ssh_key_path}"
             )

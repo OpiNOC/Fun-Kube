@@ -331,6 +331,11 @@ Test:
 - **Test 11 — parziale (2026-10-08)**: cluster HA 3 CP (senza worker) creato da nodi puliti con
   le nuove versioni → OK; addon presenti nel cluster: Calico, cert-manager, metrics-server,
   MetalLB. DA COMPLETARE: worker, Longhorn RWX, Traefik LB, DN-essence
+- **Test 11/12 — 2026-10-12**: HA 3 CP + 2 worker da nodi puliti, MetalLB, Longhorn RWX, NPM
+  (LoadBalancer), DN-essence → tutto Ready/Running, `kubectl top` OK, repliche Longhorn = 2,
+  PVC RWO e RWX Bound, NPM 2.16 + MariaDB 11.4 su Longhorn OK, keepalived iface auto-detect OK.
+  **Bug trovato**: cp1 registrato con InternalIP = VIP keepalived (vedi Note tecniche,
+  "IP del nodo esplicito") → fix e reinstallazione. Traefik ancora da verificare.
 - **Test 12** — stesso cluster con NPM al posto di Traefik
 - **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
 - **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
@@ -626,6 +631,16 @@ Il task `Wait for Calico pods to be running` esegue `kubectl wait --for=conditio
 Il task usa `ignore_errors: yes` quindi l'installazione prosegue e Calico si avvia correttamente pochi secondi dopo.
 
 **Fix applicato:** `ignore_errors: true` sul task `Wait for Calico pods to be running`. In cluster HA a 6 nodi il timeout 300s non è sempre sufficiente; il cluster si avvia correttamente comunque. Il DaemonSet viene atteso con retry prima del `kubectl wait`, quindi Calico è operativo al termine del play.
+
+**IP del nodo esplicito (node_ip)**
+keepalived aggiunge il VIP all'interfaccia del primo CP *prima* di `kubeadm init`. Senza un IP
+esplicito kubelet (InternalIP), kubeadm (advertise address di API server ed etcd) e Calico
+(auto-detect first-found) possono scegliere il VIP come IP del nodo: osservato nel lab
+(cp1 InternalIP = VIP). Quando il VIP si sposta, l'indirizzo del nodo punta a un altro CP.
+Fix: l'inventory passa `node_ip` (IP del `.env`) a ogni host → `/etc/default/kubelet`
+(`--node-ip`), `kubeadm init/join --apiserver-advertise-address`, Calico
+`nodeAddressAutodetectionV4: kubernetes: NodeInternalIP`. Il controllo `.env` ↔ cluster
+segnala i nodi con InternalIP diverso; per i CP già installati serve reinstallare.
 
 **Idempotenza**
 Ogni run può essere rieseguito senza danni:

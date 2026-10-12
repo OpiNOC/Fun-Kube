@@ -35,6 +35,10 @@
       name: default
     spec:
       calicoNetwork:
+        # Usa l'InternalIP del nodo (= --node-ip di kubelet) invece dell'auto-detect
+        # "first-found", che sui CP può scegliere il VIP keepalived.
+        nodeAddressAutodetectionV4:
+          kubernetes: NodeInternalIP
         ipPools:
         - name: default-ipv4-ippool
           cidr: {{ pod_cidr }}

@@ -17,7 +17,9 @@
       when: not kubelet_conf.stat.exists
 
     - name: Join control-plane node
-      ansible.builtin.command: "{{ cp_join_cmd_raw.stdout }}"
+      # advertise address esplicito: API server ed etcd di questo CP non devono
+      # annunciare il VIP keepalived (che può essere su questa interfaccia)
+      ansible.builtin.command: "{{ cp_join_cmd_raw.stdout }} --apiserver-advertise-address {{ node_ip }}"
       when: not kubelet_conf.stat.exists
       changed_when: true
 
