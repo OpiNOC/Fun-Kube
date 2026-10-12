@@ -30,10 +30,20 @@
   hosts: control_plane[0]
   become: true
   tasks:
+    # Versione installata: label app.kubernetes.io/version del DaemonSet (fallback:
+    # tag dell'immagine). rc != 0 = Longhorn non installato.
+    # Fino al 2026-10-12 si leggeva un'annotation longhorn.io/version inesistente:
+    # risultato sempre vuoto → apply ad ogni run e nessun blocco su downgrade/salti.
     - name: Check if longhorn-manager already installed
-      ansible.builtin.command: >
-        kubectl get daemonset longhorn-manager -n {{ longhorn_namespace }}
-        -o jsonpath='{.metadata.annotations.longhorn\.io/version}'
+      ansible.builtin.shell: |
+        set -o pipefail
+        v=$(kubectl get daemonset longhorn-manager -n {{ longhorn_namespace }} -o jsonpath='{.metadata.labels.app\.kubernetes\.io/version}') || exit 1
+        if [ -z "$v" ]; then
+          v=$(kubectl get daemonset longhorn-manager -n {{ longhorn_namespace }} -o jsonpath='{.spec.template.spec.containers[0].image}' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+        fi
+        echo "$v"
+      args:
+        executable: /bin/bash
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: lh_installed_version

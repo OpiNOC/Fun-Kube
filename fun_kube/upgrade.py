@@ -132,10 +132,14 @@ def _installed_addons(kubeconfig: Path) -> Dict[str, Optional[str]]:
         tag = _image_tag(kubeconfig, kind, obj, ns)
         if tag:
             found[name] = tag
+    # Versione Longhorn: label app.kubernetes.io/version del DaemonSet (fallback: tag
+    # immagine). Un'annotation longhorn.io/version non esiste: leggerla dava sempre
+    # vuoto e Longhorn risultava non installato (niente check sui volumi).
     rc, out, _ = _kubectl(kubeconfig, "get", "daemonset", "longhorn-manager", "-n", _LONGHORN_NS,
-                          "-o", "jsonpath={.metadata.annotations.longhorn\\.io/version}")
-    if rc == 0 and out:
-        found["longhorn"] = out.strip()
+                          "-o", "jsonpath={.metadata.labels.app\\.kubernetes\\.io/version}")
+    if rc == 0:
+        found["longhorn"] = out.strip() or _image_tag(kubeconfig, "daemonset", "longhorn-manager",
+                                                      _LONGHORN_NS) or None
     rc, _, _ = _kubectl(kubeconfig, "get", "daemonset", "traefik", "-n", "traefik")
     if rc == 0:
         found["traefik"] = None   # chart configurabile: solo check di compatibilità

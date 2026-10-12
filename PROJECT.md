@@ -282,7 +282,9 @@ Test:
   (Calico, cert-manager, metrics-server, MetalLB): tutti i nodi a v1.36.5, tutti i pod su.
   Confermato che `etcdctl` è disponibile nell'immagine etcd (snapshot pre-upgrade riuscito)
 - **Test 18b ✓ (2026-10-12)** — upgrade 1.35.9 → 1.36.5 su HA 3 CP + 3 worker con Longhorn
-  (PVC RWO/RWX, NPM su Longhorn): tutti i 6 nodi a v1.36.5, `.env` e kubectl bootstrap aggiornati
+  (PVC RWO/RWX, NPM su Longhorn): tutti i 6 nodi a v1.36.5, `.env` e kubectl bootstrap aggiornati.
+  **Nota**: a causa del bug sulla versione Longhorn (vedi Test 15) i controlli Longhorn
+  dell'upgrade (volumi healthy, attesa repliche tra i nodi) NON erano attivi: da ripetere
 - **Test 19 ✓ (2026-10-12)** — ripresa: interrotto due volte con Ctrl+C (la prima durante
   `kubeadm upgrade apply` su cp1), ripartito correttamente saltando i nodi già aggiornati.
   Scoperto che il task kubeadm è async: Ctrl+C ferma ansible ma **kubeadm prosegue in
@@ -356,7 +358,13 @@ Test:
   Calico 3.28, cert-manager 1.17, MetalLB 0.15, Longhorn 1.11, Traefik chart 39), poi `up`
   con main. Trovati: (1) attese `kubectl wait pod --all` appese sui pod vecchi durante il
   rollout (MetalLB) → rollout status / tigerastatus; (2) Installation Calico invalida per due
-  metodi di autodetection → fix sopra. Inoltre `reset` lascia i pacchetti k8s installati: il
+  metodi di autodetection → fix sopra; (3) la versione Longhorn era letta da un'annotation
+  `longhorn.io/version` inesistente (bug presente dal codice originale): sempre vuota → apply
+  del manifest ad ogni `up`, nessun blocco su downgrade/salti di minor, e `upgrade` non vedeva
+  Longhorn → ora label `app.kubernetes.io/version` con fallback sul tag immagine.
+  Risultati addon: Calico 3.32.2 (tigerastatus Available), cert-manager 1.21.2, MetalLB 0.16.0,
+  Longhorn 1.12.1 (volume healthy), Traefik chart 41.6.1 con stesso EXTERNAL-IP, dati del
+  workload `web` (PVC RWX) intatti. Inoltre `reset` lascia i pacchetti k8s installati: il
   codice vecchio non riusciva a scendere di versione (bug del fallback, già corretto in main)
 - **Test 15 (originale)** — upgrade da cluster esistente creato con le versioni precedenti
   (Calico 3.28→3.32, cert-manager 1.17→1.21, Longhorn 1.11→1.12, MariaDB 10.6→11.4)
