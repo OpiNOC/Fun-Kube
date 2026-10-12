@@ -54,7 +54,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun_kube/preflight.py         | ✓ local + SSH checks (nodi nuovi anche su cluster esistente); confronto .env ↔ cluster |
 | fun_kube/runner.py            | ✓ inventory, sequenza playbook (longhorn prima di ingress), Ctrl+C; output addon; longhorn_replicas dinamico |
 | fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP), upgrade; config_warnings |
-| fun_kube/upgrade.py           | ✓ upgrade kubeadm patch/+1 minor, ripresa (Test 16-19) — mononodo da testare |
+| fun_kube/upgrade.py           | ✓ upgrade kubeadm patch e +1 minor, ripresa, check Longhorn (Test 16-21) — mononodo da testare |
 | fun_kube/deps.py              | ✓ check + auto-install tools (kubectl pinnato, Helm 4) |
 | fun_kube/versions.py          | ✓ versioni componenti, manifest vendored, compatibilità addon ↔ K8s |
 | ansible/roles/common          | ✓ testato                      |
@@ -284,7 +284,14 @@ Test:
 - **Test 18b ✓ (2026-10-12)** — upgrade 1.35.9 → 1.36.5 su HA 3 CP + 3 worker con Longhorn
   (PVC RWO/RWX, NPM su Longhorn): tutti i 6 nodi a v1.36.5, `.env` e kubectl bootstrap aggiornati.
   **Nota**: a causa del bug sulla versione Longhorn (vedi Test 15) i controlli Longhorn
-  dell'upgrade (volumi healthy, attesa repliche tra i nodi) NON erano attivi: da ripetere
+  dell'upgrade (volumi healthy, attesa repliche tra i nodi) NON erano attivi → ripetuto col
+  Test 21
+- **Test 21 ✓ (2026-10-12)** — upgrade di **patch** 1.35.4 → 1.35.9 su HA 3 CP + 3 worker con
+  Longhorn, Traefik e workload su PVC RWX, dopo il fix della versione Longhorn: controlli Longhorn
+  attivi (task "Wait for Longhorn volumes healthy" eseguito dopo ogni nodo), `.env` e kubectl
+  bootstrap aggiornati (kubectl riportato da 1.36 a 1.35.9)
+- **Blocco cambio VIP ✓ (2026-10-12)** — `up` con KEEPALIVED_VIP diverso: fermato prima del
+  riepilogo e senza toccare i nodi, messaggio chiaro
 - **Test 19 ✓ (2026-10-12)** — ripresa: interrotto due volte con Ctrl+C (la prima durante
   `kubeadm upgrade apply` su cp1), ripartito correttamente saltando i nodi già aggiornati.
   Scoperto che il task kubeadm è async: Ctrl+C ferma ansible ma **kubeadm prosegue in
@@ -354,7 +361,7 @@ Test:
 - **Test 12** — stesso cluster con NPM al posto di Traefik
 - **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
 - **Test 14** — re-run `up` su cluster già creato (idempotenza: nessun rollout inatteso)
-- **Test 15** — IN CORSO (2026-10-12): cluster creato con il commit b31232b (K8s 1.35.4,
+- **Test 15 ✓ (2026-10-12)**: cluster creato con il commit b31232b (K8s 1.35.4,
   Calico 3.28, cert-manager 1.17, MetalLB 0.15, Longhorn 1.11, Traefik chart 39), poi `up`
   con main. Trovati: (1) attese `kubectl wait pod --all` appese sui pod vecchi durante il
   rollout (MetalLB) → rollout status / tigerastatus; (2) Installation Calico invalida per due
@@ -392,7 +399,9 @@ Test:
 
 ## Prossimi passi / idee (2026-10-08)
 
-- **Completare i test**: Traefik (11), 13 (mononodo), 14 (idempotenza completa), 15, 20, blocco cambio VIP
+- **Completare i test**: 13 e 20 (mononodo), 14 (idempotenza: secondo `up` senza modifiche)
+- **Calico APIServer**: `tigerastatus tiers` Degraded ("Waiting for Tigera API server") — decidere se
+  installare l'`APIServer` come nella configurazione upstream
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
 - **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
   madmin/funkube, rimandato a quel momento)
