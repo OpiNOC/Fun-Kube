@@ -41,15 +41,20 @@
   changed_when: "'configured' in _metallb_apply.stdout or 'created' in _metallb_apply.stdout"
   when: metallb_installed_version.stdout != metallb_version
 
-- name: Wait for MetalLB pods to be running
+# rollout status (non `kubectl wait pod --all`): segue i rollout. `wait --all`
+# includeva i pod della versione precedente in terminazione e restava appeso
+# fino al timeout ad ogni upgrade di MetalLB.
+- name: Wait for MetalLB rollout
   ansible.builtin.command: >
-    kubectl wait --for=condition=Ready pod --all -n metallb-system --timeout=300s
+    kubectl rollout status {{ item }} -n metallb-system --timeout=300s
+  loop:
+    - deployment/controller
+    - daemonset/speaker
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
   changed_when: false
-  ignore_errors: true
 
 - name: Count non-control-plane nodes
   ansible.builtin.shell: |

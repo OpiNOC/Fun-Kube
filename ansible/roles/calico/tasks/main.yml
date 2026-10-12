@@ -74,13 +74,28 @@
   until: calico_ds_count.stdout | int > 0
   changed_when: false
 
-- name: Wait for Calico pods to be running
+# Stato aggregato pubblicato dall'operatore (tutti i componenti Calico):
+# Available=True e Progressing=False → installazione/upgrade completati.
+# Sostituisce `kubectl wait pod`, che durante un upgrade restava appeso sui pod
+# vecchi in terminazione.
+- name: Wait for Calico to be Available (tigerastatus)
   ansible.builtin.command: >
-    kubectl wait --for=condition=Ready pod
-    -l k8s-app=calico-node -n calico-system --timeout=300s
+    kubectl get tigerastatus calico
+    -o jsonpath='{.status.conditions[?(@.type=="Available")].status} {.status.conditions[?(@.type=="Progressing")].status}'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ first_cp_hostname }}"
+  run_once: true
+  register: _calico_status
+  until: _calico_status.rc == 0 and _calico_status.stdout == 'True False'
+  retries: 60
+  delay: 10
+  changed_when: false
+
+- name: Wait for calico-node rollout
+  ansible.builtin.command: kubectl rollout status daemonset/calico-node -n calico-system --timeout=600s
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   delegate_to: "{{ first_cp_hostname }}"
   run_once: true
   changed_when: false
-  ignore_errors: true

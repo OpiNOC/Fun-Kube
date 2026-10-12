@@ -41,7 +41,7 @@
 
 - name: Wait for metrics-server to be ready
   ansible.builtin.command: >
-    kubectl wait --for=condition=Available deployment/metrics-server
+    kubectl rollout status deployment/metrics-server
     -n kube-system --timeout=180s
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
