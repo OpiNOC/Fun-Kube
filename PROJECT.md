@@ -402,8 +402,11 @@ Test:
 ## Prossimi passi / idee (2026-10-08)
 
 - **Completare i test**: 13 e 20 (mononodo)
-- **Calico APIServer**: aggiunto (2026-10-12) — DA TESTARE sul cluster del lab (`up`, poi
-  `kubectl get tigerastatus` tutto ok, `kubectl get tiers`), poi su installazione da zero
+- **Calico APIServer**: aggiunto e testato su cluster esistente (2026-10-12): tigerastatus
+  apiserver/calico/ippools/tiers tutti Available, `kubectl get tiers` OK, API
+  `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`). Da verificare su
+  installazione da zero (Test 13)
+- **Load worker2/worker3 ~3** costante nel lab dopo i test (altri nodi < 0.6): da indagare
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
 - **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
   madmin/funkube, rimandato a quel momento)
