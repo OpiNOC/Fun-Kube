@@ -54,7 +54,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun_kube/preflight.py         | ✓ local + SSH checks (nodi nuovi anche su cluster esistente); confronto .env ↔ cluster |
 | fun_kube/runner.py            | ✓ inventory, sequenza playbook (longhorn prima di ingress), Ctrl+C; output addon; longhorn_replicas dinamico |
 | fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP), upgrade; config_warnings |
-| fun_kube/upgrade.py           | ✓ upgrade kubeadm patch/+1 minor (Test 16-18) — ripresa e mononodo da testare |
+| fun_kube/upgrade.py           | ✓ upgrade kubeadm patch/+1 minor, ripresa (Test 16-19) — mononodo da testare |
 | fun_kube/deps.py              | ✓ check + auto-install tools (kubectl pinnato, Helm 4) |
 | fun_kube/versions.py          | ✓ versioni componenti, manifest vendored, compatibilità addon ↔ K8s |
 | ansible/roles/common          | ✓ testato                      |
@@ -255,7 +255,7 @@ Implementazione e bug trovati/fixati:
   da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
   versione sempre risolta da Python (GitHub API)
 
-### Upgrade di Kubernetes (`fun-kube upgrade`) — 2026-10-08 — PARZIALMENTE TESTATO
+### Upgrade di Kubernetes (`fun-kube upgrade`) — 2026-10-08 — TESTATO (manca mononodo)
 
 Design concordato: patch o +1 minor per esecuzione; drain → upgrade → uncordon un nodo
 alla volta; ripresa automatica; snapshot etcd sulla bootstrap; `.env` aggiornato a fine
@@ -281,14 +281,15 @@ Test:
 - **Test 18 ✓ (2026-10-08)** — upgrade 1.35.9 → 1.36.5 su HA **3 CP senza worker**
   (Calico, cert-manager, metrics-server, MetalLB): tutti i nodi a v1.36.5, tutti i pod su.
   Confermato che `etcdctl` è disponibile nell'immagine etcd (snapshot pre-upgrade riuscito)
-- **Test 18b** — DA FARE: upgrade su HA 3+3 con Longhorn e un workload con PVC
-  (nessun volume degradato tra un nodo e l'altro, PDB rispettati)
-- **Test 19** — IN CORSO (2026-10-12): Ctrl+C durante `kubeadm upgrade apply` su cp1.
-  Scoperto che il task è async: Ctrl+C ferma ansible ma **kubeadm prosegue in background**
-  sul nodo (API non raggiungibile per qualche minuto). Aggiunto: blocco se `kubeadm` è
-  ancora in esecuzione sul nodo (`pgrep -x kubeadm`), messaggi di Ctrl+C e "cluster non
-  raggiungibile" che spiegano di attendere, piano di ripresa che mostra "kubelet (control
-  plane già a ...)" per il primo CP
+- **Test 18b ✓ (2026-10-12)** — upgrade 1.35.9 → 1.36.5 su HA 3 CP + 3 worker con Longhorn
+  (PVC RWO/RWX, NPM su Longhorn): tutti i 6 nodi a v1.36.5, `.env` e kubectl bootstrap aggiornati
+- **Test 19 ✓ (2026-10-12)** — ripresa: interrotto due volte con Ctrl+C (la prima durante
+  `kubeadm upgrade apply` su cp1), ripartito correttamente saltando i nodi già aggiornati.
+  Scoperto che il task kubeadm è async: Ctrl+C ferma ansible ma **kubeadm prosegue in
+  background** sul nodo → aggiunto blocco se `kubeadm` è ancora in esecuzione (`pgrep -x`),
+  messaggi che spiegano di attendere, piano di ripresa con "kubelet (control plane già a ...)".
+  Ogni esecuzione fa un nuovo snapshot etcd (anche le riprese): pulizia manuale di
+  `output/backups/`
 - **Test 20** — DA FARE: mononodo — conferma col nome del cluster, upgrade senza drain
 
 ### Modifiche su cluster esistente (re-run di `up`) — 2026-10-08
@@ -377,7 +378,7 @@ Test:
 
 ## Prossimi passi / idee (2026-10-08)
 
-- **Completare i test**: Traefik (11), 13-15, 18b, 19, 20, blocco cambio VIP
+- **Completare i test**: Traefik (11), 13 (mononodo), 14 (idempotenza completa), 15, 20, blocco cambio VIP
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
 - **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
   madmin/funkube, rimandato a quel momento)
