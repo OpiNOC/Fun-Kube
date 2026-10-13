@@ -4,6 +4,8 @@ Tool per installare cluster Kubernetes in modo completamente automatizzato, part
 
 Un solo comando. Nessun prerequisito sui nodi oltre a Ubuntu e SSH.
 
+**Versione 1.0.0** — novità e limitazioni note in [CHANGELOG.md](CHANGELOG.md).
+
 ```bash
 git clone https://github.com/OpiNOC/Fun-Kube /root/Fun-Kube
 cd /root/Fun-Kube
@@ -74,6 +76,7 @@ I manifest applicati con kubectl sono vendored nel repo (`ansible/roles/*/files/
 | Longhorn | v1.12.1 |
 | Traefik chart (default, `TRAEFIK_CHART_VERSION`) | 41.6.1 (Traefik v3.7) |
 | Nginx Proxy Manager / MariaDB | 2.16.0 / 11.4 |
+| Monitoring: kube-prometheus-stack / Loki / Alloy (chart) | 92.3.0 / 18.15.1 / 1.13.1 |
 | Helm sulla bootstrap | 4.x |
 
 Solo `K8S_VERSION` (`latest` = ultima stabile upstream), `TRAEFIK_CHART_VERSION` (chart >= 41) e
@@ -88,6 +91,7 @@ Per aggiornare un componente: cambiare la versione in `versions.py`, eseguire
 
 ### Bootstrap machine
 Ubuntu 24.04 LTS. Può essere il tuo laptop, una VM di management, o il nodo stesso (modalità local-node).
+Fun-Kube va eseguito come **root** (kubeconfig in `/root/.kube/`, `~/.bashrc` di root).
 
 Tutte le dipendenze (Python, Ansible, kubectl, Helm) vengono **installate automaticamente** al primo `./fun-kube up`.
 
@@ -98,6 +102,8 @@ Tutte le dipendenze (Python, Ansible, kubectl, Helm) vengono **installate automa
 - Disco ≥ 20 GB
 - Accesso SSH con chiave dalla bootstrap machine
 - Sudo senza password per l'utente SSH
+- Orologio sincronizzato (NTP) — il preflight blocca scarti oltre 60s rispetto alla bootstrap
+- Accesso a Internet (repository apt, registry delle immagini, GitHub/Helm)
 
 **Non serve installare nulla sui nodi.** Fun-Kube ci pensa.
 
@@ -428,13 +434,14 @@ Fun-Kube verifica le sovrapposizioni all'avvio e blocca con un errore chiaro se 
   --skip-checks               # salta i preflight check SSH
   --yes / -y                  # salta la conferma interattiva
 
-./fun-kube reset [.env]       # distrugge il cluster (kubeadm reset su tutti i nodi)
+./fun-kube reset [.env]       # distrugge il cluster: arresto pulito dei workload, kubeadm reset
   --yes                       # salta la conferma interattiva
   --reboot                    # riavvia i nodi a fine reset (stato pulito garantito)
                               # Nota: agisce solo sui nodi. Sulla bootstrap machine
                               # rimangono kubeconfig, output/ e venv (non interferiscono con un nuovo up)
 
-./fun-kube diagnose [.env]    # stato nodi: kubelet, containerd, disco, RAM, versioni
+./fun-kube diagnose [.env]    # stato nodi (kubelet, containerd, disco, RAM, versioni) e addon,
+                              # con gli alert attivi se il monitoring è installato
 
 ./fun-kube upgrade --to v1.36.5 [.env]   # aggiorna Kubernetes (kubeadm upgrade)
   --dry-run                   # solo controlli e piano, nessuna modifica
@@ -444,6 +451,8 @@ Fun-Kube verifica le sovrapposizioni all'avvio e blocca con un errore chiaro se 
 
 ./fun-kube check-deps         # verifica tool sulla bootstrap machine
   --verbose                   # mostra le versioni
+
+./fun-kube --version          # versione di Fun-Kube
 ```
 
 Ogni sottocomando accetta `--help` per la lista completa delle opzioni.
@@ -462,6 +471,7 @@ Al termine dell'installazione:
 | `output/cluster-info.txt` | Riepilogo rapido del cluster |
 | `output/inventory.ini` | Inventory Ansible generato |
 | `output/traefik-letsencrypt-guide.txt` | Guida LE (solo se Traefik senza ACME email) |
+| `output/backups/` | Snapshot etcd presi da `fun-kube upgrade` prima di ogni upgrade |
 
 `~/.bashrc` viene aggiornato automaticamente con `KUBECONFIG`, `alias k=kubectl` e autocompletamento.
 
@@ -524,12 +534,13 @@ Fun-Kube/
 ├── fun-kube                      # CLI (eseguibile diretto, auto-bootstrap venv)
 ├── .env.example                  # template configurazione
 ├── fun_kube/
-│   ├── cli.py                    # comandi: up, check-deps, reset, diagnose
+│   ├── cli.py                    # comandi: up, upgrade, reset, diagnose, check-deps
 │   ├── config.py                 # parsing .env, validazione, topologia
-│   ├── preflight.py              # check pre-installazione sui nodi
+│   ├── preflight.py              # check sui nodi + confronto .env ↔ cluster esistente
 │   ├── runner.py                 # inventory + sequenza playbook + output
 │   ├── deps.py                   # verifica e auto-install tool bootstrap
 │   ├── upgrade.py                # comando upgrade (controlli + esecuzione)
+│   ├── reset.py                  # comando reset (arresto workload, reset nodi)
 │   └── versions.py               # versioni di tutti i componenti
 ├── scripts/
 │   └── vendor-manifests.py       # riscarica i manifest vendored
@@ -552,6 +563,7 @@ Fun-Kube/
     │   ├── monitoring.yml             # Prometheus, Grafana, Loki, Alloy
     │   ├── metallb.yml
     │   ├── longhorn.yml
+    │   ├── upgrade.yml                # upgrade kubeadm (+ tasks/upgrade-node.yml)
     │   ├── ingress.yml                # Traefik o Nginx Proxy Manager
     │   └── dn-essence.yml
     └── roles/
@@ -568,7 +580,9 @@ Fun-Kube/
         ├── traefik/                   # DaemonSet, Helm, LB/NodePort, LE
         ├── nginx-proxy-manager/       # DaemonSet, LB/NodePort, multi/single-node
         ├── longhorn/                  # storage distribuito, RWO + RWX
-        └── dn-essence/               # DNS rewrite manager per CoreDNS, UI web
+        ├── dn-essence/                # DNS rewrite manager per CoreDNS, UI web
+        ├── control-plane-metrics/     # metriche scheduler/controller-manager/etcd/kube-proxy
+        └── monitoring/                # kube-prometheus-stack, Loki, Alloy, dashboard
 ```
 
 ---
@@ -601,10 +615,25 @@ ssh root@<node-ip> 'journalctl -u kubelet -f'
 ssh root@<cp-ip> 'sudo kubeadm certs check-expiration'
 ```
 
+**Verifica completa senza modifiche** (configurazione + preflight via SSH):
+```bash
+./fun-kube up --dry-run
+```
+
+**Orologio dei nodi sfasato** (es. VM ripristinate da snapshot con RAM): il preflight lo segnala;
+apt rifiuta i repository ("Release file is not valid yet") e i certificati risultano non validi.
+```bash
+ssh root@<node-ip> 'timedatectl set-ntp true; systemctl restart chrony 2>/dev/null; chronyc makestep'
+```
+
+**Spazio Longhorn insufficiente** per il monitoring: il controllo (anche in `--dry-run`) indica lo
+spazio prenotabile per nodo; ridurre `PROM_STORAGE` / `LOKI_STORAGE` o ingrandire i dischi.
+
 **Reinstallare da zero:**
 ```bash
-./fun-kube reset --yes
+./fun-kube reset --yes --reboot
 ./fun-kube up
 ```
 
-`reset` lascia i nodi in uno stato pulito pronto per un nuovo `up`.
+`reset` arresta prima i workload (i volumi Longhorn/NFS si staccano in modo pulito) e segnala i
+nodi con processi bloccati; `--reboot` riavvia i nodi e garantisce uno stato pulito.

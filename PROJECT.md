@@ -1,6 +1,10 @@
 Fun-Kube — Kubernetes Cluster Provisioning Tool
 ================================================
 
+**Versione corrente: 1.0.0** (2026-10-13) — riepilogo e limitazioni note in `CHANGELOG.md`.
+Questo file è il diario tecnico del progetto: obiettivi, test eseguiti, note tecniche e
+prossimi passi.
+
 ## Obiettivo
 
 Costruire un tool che permetta di creare cluster Kubernetes in modo completamente
@@ -10,9 +14,10 @@ Il tool deve:
   • richiedere UN solo comando (./fun-kube up)
   • auto-installare tutte le proprie dipendenze al primo avvio
   • supportare topologie: mononodo, single control-plane, HA multi control-plane
-  • installare sempre l'ultima versione stabile di Kubernetes (override possibile)
+  • installare versioni testate e fissate nel repo (Kubernetes: K8S_VERSION, anche "latest")
   • usare kubeadm + Calico CNI
-  • supportare addon opzionali: MetalLB, Ingress (Traefik / NPM), Longhorn, DN-essence
+  • supportare addon opzionali: MetalLB, Ingress (Traefik / NPM), Longhorn, DN-essence, Monitoring
+  • aggiornare Kubernetes in sicurezza (fun-kube upgrade)
   • essere idempotente (ogni riesecuzione converge senza danni)
 
 Sistema target: Ubuntu 24.04 LTS (nodi e bootstrap)
@@ -53,7 +58,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun_kube/config.py            | ✓ parsing, validazione, topologia, gap detection NODE_N |
 | fun_kube/preflight.py         | ✓ local + SSH checks (nodi nuovi anche su cluster esistente); confronto .env ↔ cluster |
 | fun_kube/runner.py            | ✓ inventory, sequenza playbook (longhorn prima di ingress), Ctrl+C; output addon; longhorn_replicas dinamico |
-| fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP), upgrade; config_warnings |
+| fun_kube/cli.py               | ✓ up, check-deps, reset, diagnose (nodi + addon + alert), upgrade, --version; config_warnings |
+| fun_kube/reset.py             | ✓ arresto pulito workload, reset nodi, processi bloccati, --reboot — verificato offline |
 | fun_kube/upgrade.py           | ✓ upgrade kubeadm patch e +1 minor, ripresa, check Longhorn, mononodo (Test 16-21) |
 | fun_kube/deps.py              | ✓ check + auto-install tools (kubectl pinnato, Helm 4) |
 | fun_kube/versions.py          | ✓ versioni componenti, manifest vendored, compatibilità addon ↔ K8s |
@@ -70,11 +76,11 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE, externalTrafficPolicy:Local (Test 7) |
 | ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node, externalTrafficPolicy:Local (Test 8) |
 | ansible/roles/longhorn        | ✓ testato (Test 9)                   |
-| ansible/roles/monitoring      | implementato — kube-prometheus-stack, Loki, Alloy, dashboard log, check capienza Longhorn — DA TESTARE |
-| ansible/roles/control-plane-metrics | implementato — metriche scheduler/controller-manager/etcd/kube-proxy su 0.0.0.0 — DA TESTARE |
+| ansible/roles/monitoring      | ✓ testato (Test 22) — kube-prometheus-stack, Loki, Alloy, dashboard log, check capienza Longhorn |
+| ansible/roles/control-plane-metrics | ✓ testato (Test 22, 24) — metriche control plane su 0.0.0.0, persistenti dopo upgrade |
 | ansible/roles/dn-essence      | ✓ implementato — Helm OCI, NodePort/ClusterIP, default enabled; fix delegate_to: localhost |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
-| bootstrap-setup.sh            | legacy — non più necessario    |
+| bootstrap-setup.sh            | legacy — non più necessario (installa Helm 3, superato da deps.py) |
 
 ---
 
@@ -407,7 +413,7 @@ Test:
 
 ---
 
-### Addon monitoring — 2026-10-13 — IN TEST
+### Addon monitoring — 2026-10-13 — TESTATO (nel lab; adozione OPI da fare)
 
 Dalla guida observability di Enrico (kube-prometheus-stack 91.8.2 / Loki 18.13.7 / Alloy 1.13.0
 installati a mano sul cluster OPI, creato con Fun-Kube). Scelte:

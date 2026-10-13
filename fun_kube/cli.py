@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from . import __version__
 from . import config as cfg_module
 from .config import ConfigError
 from . import preflight, runner, deps, versions
@@ -22,6 +23,20 @@ app = typer.Typer(
 )
 console = Console()
 err = Console(stderr=True)
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"Fun-Kube {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True,
+                                 help="Mostra la versione ed esce"),
+) -> None:
+    """Fun-Kube — provisioning e gestione di cluster Kubernetes (kubeadm)."""
 
 
 @app.command()
@@ -39,7 +54,7 @@ def up(
     """Provisiona un cluster Kubernetes dal file .env."""
 
     console.print(Panel(
-        "[bold cyan]Fun-Kube[/] — Kubernetes Cluster Provisioner",
+        f"[bold cyan]Fun-Kube {__version__}[/] — Kubernetes Cluster Provisioner",
         expand=False,
     ))
 
@@ -152,7 +167,7 @@ def check_deps(
 ) -> None:
     """Verifica che tutti i tool necessari siano installati sulla macchina bootstrap."""
     console.print(Panel(
-        "[bold cyan]Fun-Kube[/] — Bootstrap machine dependency check",
+        f"[bold cyan]Fun-Kube {__version__}[/] — Bootstrap machine dependency check",
         expand=False,
     ))
     console.print()
@@ -180,7 +195,7 @@ def upgrade(
     from . import upgrade as upg
 
     console.print(Panel(
-        "[bold cyan]Fun-Kube Upgrade[/] — Kubernetes (kubeadm), un nodo alla volta",
+        f"[bold cyan]Fun-Kube {__version__} Upgrade[/] — Kubernetes (kubeadm), un nodo alla volta",
         expand=False,
     ))
 
@@ -307,7 +322,7 @@ def reset(
     from . import reset as rst
 
     console.print(Panel(
-        "[bold red]Fun-Kube RESET[/] — Questa operazione è distruttiva e irreversibile",
+        f"[bold red]Fun-Kube {__version__} RESET[/] — Questa operazione è distruttiva e irreversibile",
         expand=False,
     ))
 
@@ -363,7 +378,7 @@ def diagnose(
     import os
 
     console.print(Panel(
-        "[bold cyan]Fun-Kube Diagnose[/] — Stato nodi e addon",
+        f"[bold cyan]Fun-Kube {__version__} Diagnose[/] — Stato nodi e addon",
         expand=False,
     ))
 
