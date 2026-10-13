@@ -412,7 +412,9 @@ Test:
 Dalla guida observability di Enrico (kube-prometheus-stack 91.8.2 / Loki 18.13.7 / Alloy 1.13.0
 installati a mano sul cluster OPI, creato con Fun-Kube). Scelte:
 - variabili con i nomi della guida (`GRAFANA_*`, `PROM_*`, `LOKI_*`, `ALERTMANAGER_*`) +
-  `MONITORING_ENABLED` e `MONITORING_STORAGE_CLASS`; default = valori in uso su OPI
+  `MONITORING_ENABLED` e `MONITORING_STORAGE_CLASS`; default volumi per cluster piccolo/medio
+  (Prometheus 10Gi/8GB, Loki 10Gi, Grafana 1Gi, Alertmanager 1Gi = 22Gi) invece dei valori
+  della guida per cluster grandi (30/20/5/2 = 57Gi), riportati nel `.env.example`
 - esposizione (rivista con Marco): default prudente `GRAFANA_EXPOSE=auto` = loadbalancer
   (MetalLB, `GRAFANA_LB_IP=auto` o IP del pool, `GRAFANA_ALLOWED_CIDRS` →
   loadBalancerSourceRanges) altrimenti nodeport (30300); `clusterip` esplicito per NPM nel
@@ -430,7 +432,8 @@ installati a mano sul cluster OPI, creato con Fun-Kube). Scelte:
   `control-plane-metrics.yml`: `kubeadm-config` (persistenza per upgrade e join), ConfigMap
   kube-proxy, manifest statici un CP alla volta con attesa
 - controllo capienza Longhorn prima dell'installazione (`files/longhorn_capacity.py`): i
-  worker del lab (dischi 47 GiB → ~31 GiB prenotabili) NON bastano per i default (114 GiB)
+  worker del lab (dischi 47 GiB → ~31 GiB prenotabili, ~93 in tutto) bastano per i default
+  (44 GiB) ma NON per i valori da cluster grande (114 GiB)
 - limiti inotify (`/etc/sysctl.d/99-inotify.conf`) nel role `common` per tutti i cluster
 - versioni: kube-prometheus-stack 92.3.0 (91→92: solo nodeSelector linux, un riavvio),
   Loki 18.15.1, Alloy 1.13.1
@@ -441,13 +444,16 @@ kube-proxy (formato v1beta4, idempotente), replace dei manifest (idempotente, no
 generati in 5 scenari (Service/Ingress Grafana, root_url, retention, volumi, Slack, toleration).
 
 Test da fare:
-- **Test 22** — lab HA: `MONITORING_ENABLED=true` con dimensioni ridotte (dischi 47 GiB), poi
-  verificare alert del control plane spariti, dashboard "Log dei pod", eventi in Loki
-- **Test 23** — lab: dimensioni di default → `up` deve fermarsi sul controllo di capienza
+- **Test 22** — lab HA: `MONITORING_ENABLED=true` con i default, poi verificare alert del
+  control plane spariti, dashboard "Log dei pod", eventi in Loki
+- **Test 23** — lab: valori da cluster grande (30/20/5/2) → `up` deve fermarsi sul controllo
+  di capienza
 - **Test 24** — `fun-kube upgrade` su cluster con monitoring: le metriche del control plane
   restano su 0.0.0.0 dopo `kubeadm upgrade`
 - **Test 25** — cluster OPI: adozione dell'installazione manuale (prima `--dry-run`), con
-  `GRAFANA_EXPOSE=clusterip` e `GRAFANA_DOMAIN=watch-k8s.opiquad.it` (come oggi)
+  `GRAFANA_EXPOSE=clusterip`, `GRAFANA_DOMAIN=watch-k8s.opiquad.it` e i volumi attuali
+  (`PROM_STORAGE=30Gi PROM_RETENTION_SIZE=25GB LOKI_STORAGE=20Gi GRAFANA_STORAGE=5Gi
+  ALERTMANAGER_STORAGE=2Gi`)
 
 ## Prossimi passi / idee (2026-10-08)
 

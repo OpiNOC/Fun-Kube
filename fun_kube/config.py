@@ -393,12 +393,13 @@ def _parse_monitoring(env: dict) -> MonitoringConfig:
         storage_class=_str(env, "MONITORING_STORAGE_CLASS", "auto"),
         create_longhorn_sc=False,
         prom_retention=_str(env, "PROM_RETENTION", "15d"),
-        prom_retention_size=_str(env, "PROM_RETENTION_SIZE", "25GB"),
-        prom_storage=_str(env, "PROM_STORAGE", "30Gi"),
+        # Default per un cluster piccolo/medio (fino a ~10 nodi, qualche centinaio di pod).
+        prom_retention_size=_str(env, "PROM_RETENTION_SIZE", "8GB"),
+        prom_storage=_str(env, "PROM_STORAGE", "10Gi"),
         loki_retention=_str(env, "LOKI_RETENTION", "168h"),
-        loki_storage=_str(env, "LOKI_STORAGE", "20Gi"),
-        grafana_storage=_str(env, "GRAFANA_STORAGE", "5Gi"),
-        alertmanager_storage=_str(env, "ALERTMANAGER_STORAGE", "2Gi"),
+        loki_storage=_str(env, "LOKI_STORAGE", "10Gi"),
+        grafana_storage=_str(env, "GRAFANA_STORAGE", "1Gi"),
+        alertmanager_storage=_str(env, "ALERTMANAGER_STORAGE", "1Gi"),
         slack_webhook=_str(env, "ALERTMANAGER_SLACK_WEBHOOK"),
         slack_channel=_str(env, "ALERTMANAGER_SLACK_CHANNEL", "#alert-k8s"),
     )

@@ -384,9 +384,10 @@ Prometheus e Alertmanager non vengono mai pubblicati (nessuna autenticazione): s
 `kubectl port-forward`.
 
 **Storage**: con Longhorn crea la StorageClass `longhorn-monitoring` (max 2 repliche, `Retain`) e
-verifica prima che ci sia spazio prenotabile: i default (30+20+5+2 GiB) × 2 repliche richiedono
-~114 GiB sui dischi Longhorn. Sul mononodo usa local-path. Le dimensioni non si possono
-cambiare dopo l'installazione.
+verifica prima che ci sia spazio prenotabile. I default sono per un cluster piccolo/medio:
+Prometheus 10Gi (retention 15 giorni / 8GB), Loki 10Gi (7 giorni), Grafana 1Gi, Alertmanager 1Gi
+= 22Gi, cioè ~44 GiB su Longhorn con 2 repliche (valori per cluster grandi nel `.env.example`).
+Sul mononodo usa local-path. Le dimensioni non si possono cambiare dopo l'installazione.
 
 **Metriche del control plane**: kubeadm le espone solo su `127.0.0.1`; con il monitoring
 abilitato Fun-Kube le porta su `0.0.0.0` (scheduler, controller-manager, etcd, kube-proxy),
