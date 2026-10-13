@@ -411,7 +411,7 @@ Test:
   in stato D), LOCAL_NODE (bootstrap = nodo)
 - **Calico APIServer**: aggiunto e testato su cluster esistente (2026-10-12): tigerastatus
   apiserver/calico/ippools/tiers tutti Available, `kubectl get tiers` OK, API
-  `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`). Da verificare su
+  `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`); verificato anche su
   installazione da zero (Test 13)
 - **Load worker2/worker3 ~3**: causa trovata (processi bloccati su NFS dopo un reset) → nuovo
   `reset` con arresto pulito dei workload e `--reboot`. DA TESTARE: reset del cluster HA con
