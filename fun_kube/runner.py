@@ -809,10 +809,11 @@ PORT_FORWARD_HINT = [
 
 def _grafana_live_lb_ip(cluster: "ClusterConfig") -> str:
     """IP assegnato da MetalLB al Service di Grafana ('' se non leggibile)."""
-    kubeconfig = Path(f"/root/.kube/{cluster.cluster_name}")
-    if not kubeconfig.exists():
-        return ""
+    # Best effort: un errore qui non deve far fallire up dopo un'installazione riuscita.
     try:
+        kubeconfig = Path(f"/root/.kube/{cluster.cluster_name}")
+        if not kubeconfig.exists():
+            return ""
         r = subprocess.run(
             ["kubectl", "--request-timeout=10s", "-n", "monitoring", "get", "svc",
              "kube-prometheus-stack-grafana", "-o", "jsonpath={.status.loadBalancer.ingress[0].ip}"],
