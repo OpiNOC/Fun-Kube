@@ -468,6 +468,8 @@ def _print_addon_status(kube_env: dict, cluster) -> None:
         sections.append(_longhorn_section(kube_env))
     if "dn-essence" in namespaces:
         sections.append(_dn_essence_section(kube_env, cluster))
+    if "monitoring" in namespaces:
+        sections.append(_monitoring_section(kube_env, cluster))
 
     if sections:
         console.print()
@@ -743,6 +745,49 @@ def _longhorn_section(kube_env: dict) -> str:
     return "\n".join(lines)
 
 
+def _monitoring_section(kube_env: dict, cluster) -> str:
+    lines = ["[bold]Monitoring[/]"]
+    rc, out, _ = _kctl(["get", "svc", "kube-prometheus-stack-grafana", "-n", "monitoring", "--no-headers",
+                         "-o", "custom-columns=TYPE:.spec.type,IP:.status.loadBalancer.ingress[0].ip,"
+                               "NP:.spec.ports[0].nodePort"], kube_env)
+    if rc == 0 and out:
+        parts = out.split()
+        rc2, host, _ = _kctl(["get", "ingress", "-n", "monitoring",
+                              "-o", "jsonpath={.items[0].spec.rules[0].host}"], kube_env)
+        if rc2 == 0 and host:
+            lines.append(f"  Grafana: [cyan]{host}[/] (Ingress)")
+        elif parts[0] == "LoadBalancer":
+            lines.append(f"  Grafana: [cyan]http://{parts[1] if len(parts) > 1 else 'pending'}[/] (LoadBalancer)")
+        elif parts[0] == "NodePort":
+            lines.append(f"  Grafana: [cyan]http://{cluster.api_endpoint}:{parts[2]}[/] (NodePort)")
+        else:
+            lines.append("  Grafana: ClusterIP (kube-prometheus-stack-grafana.monitoring.svc:80)")
+    rc, out, _ = _kctl(["get", "pvc", "-n", "monitoring", "--no-headers",
+                         "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase,CAP:.status.capacity.storage"],
+                        kube_env)
+    if rc == 0 and out:
+        pvcs = [l.split() for l in out.splitlines()]
+        bound = sum(1 for p in pvcs if len(p) > 1 and p[1] == "Bound")
+        lines.append(f"  PVC: {bound}/{len(pvcs)} Bound ({', '.join(p[2] for p in pvcs if len(p) > 2)})")
+    rc, out, _ = _kctl(["get", "--raw", "/api/v1/namespaces/monitoring/services/"
+                        "kube-prometheus-stack-prometheus:http-web/proxy/api/v1/alerts"], kube_env, timeout=15)
+    if rc == 0 and out:
+        import json as _json
+        try:
+            alerts = [a["labels"]["alertname"] for a in _json.loads(out)["data"]["alerts"]
+                      if a.get("state") == "firing" and a["labels"]["alertname"] != "Watchdog"]
+            if alerts:
+                from collections import Counter
+                txt = ", ".join(f"{k}×{v}" if v > 1 else k for k, v in Counter(alerts).most_common(6))
+                lines.append(f"  [yellow]Alert attivi: {txt}[/]")
+            else:
+                lines.append("  [green]Nessun alert attivo[/] (oltre a Watchdog)")
+        except (ValueError, KeyError):
+            pass
+    lines.append(f"  Pods: {_pod_summary(kube_env, 'monitoring')}")
+    return "\n".join(lines)
+
+
 def _dn_essence_section(kube_env: dict, cluster) -> str:
     lines = ["[bold]DN-essence[/]"]
 
@@ -794,6 +839,7 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
             (f"Ingress/{cluster.ingress.type}", cluster.ingress.enabled),
             ("Longhorn", cluster.longhorn.enabled),
             ("DN-essence", cluster.dn_essence.enabled),
+            ("Monitoring", cluster.monitoring.enabled),
         ]
         if enabled
     ]
@@ -896,6 +942,19 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
             console.print(f"    DN-essence UI     : {dn_ui}")
             if cluster.dn_essence.version:
                 console.print(f"    DN-essence version: {cluster.dn_essence.version}")
+        if cluster.monitoring.enabled:
+            m = cluster.monitoring
+            url, target = runner.grafana_access(cluster)
+            auto = " (auto)" if m.grafana_expose_requested == "auto" else ""
+            console.print(f"    Grafana           : {url}")
+            console.print(f"    Esposizione       : {m.grafana_expose}{auto}"
+                          + (f" → proxy verso {target}" if target else ""))
+            sc_note = f" (creata, {cluster.monitoring_sc_replicas} repliche, Retain)" if m.create_longhorn_sc else ""
+            console.print(f"    Storage monitoring: {m.storage_class}{sc_note} — "
+                          f"{m.prom_storage}+{m.loki_storage}+{m.grafana_storage}+{m.alertmanager_storage}")
+            console.print(f"    Chart             : kube-prometheus-stack {versions.KUBE_PROMETHEUS_STACK_CHART_VERSION}, "
+                          f"loki {versions.LOKI_CHART_VERSION}, alloy {versions.ALLOY_CHART_VERSION}")
+            console.print("    Control plane     : metriche esposte su 0.0.0.0 (scheduler, controller-manager, etcd, kube-proxy)")
     else:
         console.print("  Addon        : nessuno")
 

@@ -1,0 +1,38 @@
+# Manifest statici sul control-plane corrente (il playbook gira con serial: 1).
+# kubelet riavvia il componente quando il file cambia; si attende che sia in ascolto
+# anche fuori da 127.0.0.1 prima di passare al nodo successivo (etcd: un membro alla volta).
+# Le sonde di kubeadm restano su 127.0.0.1, compatibile con 0.0.0.0.
+---
+- name: Expose metrics in static pod manifests
+  ansible.builtin.replace:
+    path: "/etc/kubernetes/manifests/{{ item.file }}"
+    regexp: "{{ item.regexp }}"
+    replace: "{{ item.replace }}"
+  loop:
+    - {file: kube-scheduler.yaml, regexp: '--bind-address=127\.0\.0\.1$', replace: '--bind-address=0.0.0.0'}
+    - {file: kube-controller-manager.yaml, regexp: '--bind-address=127\.0\.0\.1$', replace: '--bind-address=0.0.0.0'}
+    - {file: etcd.yaml, regexp: '--listen-metrics-urls=http://127\.0\.0\.1:2381$', replace: '--listen-metrics-urls=http://0.0.0.0:2381'}
+  register: _cpm_manifests
+
+- name: Wait for components listening beyond 127.0.0.1
+  ansible.builtin.shell: |
+    set -o pipefail
+    ss -Hltn "sport = :{{ item }}" | awk '{print $4}' | grep -qvE '^127\.0\.0\.1:'
+  args:
+    executable: /bin/bash
+  loop: [10259, 10257, 2381]
+  register: _cpm_listen
+  until: _cpm_listen.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+  when: _cpm_manifests is changed
+
+- name: Wait for etcd healthy after restart
+  ansible.builtin.command: curl -s --max-time 3 http://127.0.0.1:2381/health
+  register: _cpm_etcd
+  until: _cpm_etcd.rc == 0 and '"health":"true"' in _cpm_etcd.stdout
+  retries: 30
+  delay: 5
+  changed_when: false
+  when: _cpm_manifests is changed

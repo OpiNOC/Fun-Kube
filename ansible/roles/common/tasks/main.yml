@@ -133,6 +133,19 @@
     mode: '0644'
   become: true
 
+# Il default Ubuntu (max_user_instances = 128) si esaurisce su un nodo Kubernetes
+# (kubelet, containerd, CNI, applicazioni, Alloy): "failed to create fsnotify watcher:
+# too many open files". Stesso file e contenuto della guida observability, così i nodi
+# già configurati a mano non cambiano.
+- name: Raise inotify limits
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-inotify.conf
+    content: |
+      fs.inotify.max_user_instances = 8192
+      fs.inotify.max_user_watches = 524288
+    mode: '0644'
+  become: true
+
 - name: Apply sysctl settings
   ansible.builtin.command: sysctl --system
   become: true

@@ -1,0 +1,11 @@
+# Addon monitoring: kube-prometheus-stack, Loki, Alloy (log + eventi), dashboard log.
+# Dopo control-plane-metrics.yml, longhorn.yml e ingress.yml (StorageClass, Traefik).
+---
+- name: Deploy monitoring stack
+  hosts: control_plane[0]
+  gather_facts: false
+  tasks:
+    - name: Apply monitoring role
+      ansible.builtin.include_role:
+        name: monitoring
+      when: monitoring_enabled | default(false) | bool

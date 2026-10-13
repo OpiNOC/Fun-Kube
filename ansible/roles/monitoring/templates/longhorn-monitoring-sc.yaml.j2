@@ -1,0 +1,15 @@
+# StorageClass dedicata (guida observability, passo 3): metriche e log sono dati
+# sacrificabili con molte scritture → max 2 repliche; Retain contro la perdita dei dati
+# in caso di disinstallazione accidentale. Creata solo se assente (parameters immutabili).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-monitoring
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "{{ monitoring_sc_replicas }}"
+  staleReplicaTimeout: "2880"
+  dataLocality: "best-effort"

@@ -374,6 +374,52 @@ def check_existing_cluster(cluster: ClusterConfig) -> Tuple[List[str], List[str]
                     "    (procedura nel file /root/<cluster>-manutenzione.txt)."
                 )
 
+    # --- Monitoring già installato (adozione / re-run) ---
+    if cluster.monitoring.enabled:
+        from .config import quantity_bytes
+        m = cluster.monitoring
+        expected = {
+            "prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0":
+                ("PROM_STORAGE", m.prom_storage),
+            "storage-loki-0": ("LOKI_STORAGE", m.loki_storage),
+            "kube-prometheus-stack-grafana": ("GRAFANA_STORAGE", m.grafana_storage),
+            "alertmanager-kube-prometheus-stack-alertmanager-db-alertmanager-kube-prometheus-stack-alertmanager-0":
+                ("ALERTMANAGER_STORAGE", m.alertmanager_storage),
+        }
+        rc, out = kubectl("get", "pvc", "-n", "monitoring", "-o", "json")
+        if rc == 0 and out:
+            try:
+                pvcs = {p["metadata"]["name"]: p["spec"]["resources"]["requests"]["storage"]
+                        for p in json.loads(out).get("items", [])}
+            except (ValueError, KeyError):
+                pvcs = {}
+            for name, (key, wanted) in expected.items():
+                current = pvcs.get(name)
+                try:
+                    differs = current is not None and quantity_bytes(current) != quantity_bytes(wanted)
+                except ValueError:
+                    differs = False
+                if differs:
+                    errors.append(
+                        f"{key}={wanted} ma il volume esistente {name.split('-db-')[0]} è {current}.\n"
+                        "    Le dimensioni dei volumi del monitoring non cambiano con un upgrade Helm\n"
+                        f"    (template dei volumi immutabili): impostare {key}={current} nel .env."
+                    )
+        if m.grafana_admin_password:
+            rc, out = kubectl("get", "secret", "kube-prometheus-stack-grafana", "-n", "monitoring",
+                              "-o", "jsonpath={.data.admin-password}")
+            if rc == 0 and out:
+                try:
+                    current_pw = base64.b64decode(out).decode()
+                except ValueError:
+                    current_pw = None
+                if current_pw is not None and current_pw != m.grafana_admin_password:
+                    warnings.append(
+                        "GRAFANA_ADMIN_PASSWORD diversa da quella dell'installazione esistente: Grafana\n"
+                        "    conserva la password nel suo database, il login resta quello attuale.\n"
+                        "    Cambiarla da Grafana (Administration → Users) oppure lasciare la variabile vuota."
+                    )
+
     # --- Repliche Longhorn ---
     if cluster.longhorn.enabled:
         rc, out = kubectl("get", "storageclass", "longhorn",

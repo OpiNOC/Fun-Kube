@@ -23,6 +23,11 @@ LONGHORN_VERSION = "v1.12.1"
 # Helm chart (default se TRAEFIK_CHART_VERSION non è impostato in .env)
 TRAEFIK_CHART_VERSION = "41.6.1"
 
+# Addon monitoring (Helm chart)
+KUBE_PROMETHEUS_STACK_CHART_VERSION = "92.3.0"   # prometheus-community/kube-prometheus-stack
+LOKI_CHART_VERSION = "18.15.1"                   # grafana-community/loki (Loki 3.7.8)
+ALLOY_CHART_VERSION = "1.13.1"                   # grafana/alloy
+
 # Immagini Nginx Proxy Manager
 NPM_IMAGE_VERSION = "2.16.0"
 MARIADB_IMAGE_VERSION = "11.4"
@@ -38,6 +43,7 @@ K8S_COMPAT = {
     "longhorn":       (33, 36),    # longhorn.io/docs/1.12.1 — testato 1.33–1.36
     "metallb":        (None, None),  # nessuna matrice ufficiale
     "traefik":        (25, None),  # Chart.yaml kubeVersion >=1.25
+    "monitoring":     (25, None),  # kube-prometheus-stack / loki: kubeVersion >=1.25
 }
 
 
@@ -92,4 +98,7 @@ def ansible_vars() -> dict:
         "longhorn_version": LONGHORN_VERSION,
         "npm_image_version": NPM_IMAGE_VERSION,
         "mariadb_image_version": MARIADB_IMAGE_VERSION,
+        "kps_chart_version": KUBE_PROMETHEUS_STACK_CHART_VERSION,
+        "loki_chart_version": LOKI_CHART_VERSION,
+        "alloy_chart_version": ALLOY_CHART_VERSION,
     }

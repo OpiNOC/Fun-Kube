@@ -1,0 +1,22 @@
+# Alloy Deployment: eventi Kubernetes → Loki (guida observability, passo 7).
+# DEVE restare a 1 replica, altrimenti gli eventi vengono duplicati.
+controller:
+  type: deployment
+  replicas: 1
+
+alloy:
+  configMap:
+    content: |
+      loki.source.kubernetes_events "events" {
+        log_format = "logfmt"
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+        external_labels = {
+          cluster = "{{ cluster_name }}",
+        }
+      }

@@ -1,0 +1,100 @@
+# kube-prometheus-stack — generato da Fun-Kube (guida observability, passo 4)
+{% set _scheme = 'http' if (monitoring_grafana_expose == 'ingress' and not traefik_acme_email) else 'https' %}
+grafana:
+  adminPassword: "{{ _grafana_admin_password }}"
+  persistence:
+    enabled: true
+    size: {{ monitoring_grafana_storage }}
+    storageClassName: {{ monitoring_storage_class }}
+{% if monitoring_grafana_expose == 'nodeport' %}
+  service:
+    type: NodePort
+    port: 80
+    nodePort: {{ monitoring_grafana_nodeport }}
+{% elif monitoring_grafana_expose == 'loadbalancer' %}
+  service:
+    type: LoadBalancer
+    port: 80
+{% if monitoring_grafana_lb_ip %}
+    annotations:
+      metallb.io/loadBalancerIPs: "{{ monitoring_grafana_lb_ip }}"
+{% endif %}
+{% else %}
+  service:
+    type: ClusterIP
+    port: 80
+{% endif %}
+{% if monitoring_grafana_expose == 'ingress' %}
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+{% if traefik_acme_email %}
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+{% endif %}
+    hosts:
+      - {{ monitoring_grafana_domain }}
+    path: /
+{% if traefik_acme_email %}
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - {{ monitoring_grafana_domain }}
+{% endif %}
+{% endif %}
+{% if monitoring_grafana_domain %}
+  grafana.ini:
+    server:
+      root_url: "{{ _scheme }}://{{ monitoring_grafana_domain }}"
+{% endif %}
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc.cluster.local:3100
+      access: proxy
+
+prometheus:
+  prometheusSpec:
+    externalLabels:
+      cluster: {{ cluster_name }}
+    retention: {{ monitoring_prom_retention }}
+    retentionSize: {{ monitoring_prom_retention_size }}
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: {{ monitoring_storage_class }}
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: {{ monitoring_prom_storage }}
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: {{ monitoring_storage_class }}
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: {{ monitoring_alertmanager_storage }}
+{% if monitoring_slack_webhook %}
+  config:
+    route:
+      receiver: slack
+      group_by: ["alertname", "namespace"]
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+    receivers:
+      - name: slack
+        slack_configs:
+          - api_url: "{{ monitoring_slack_webhook }}"
+            channel: "{{ monitoring_slack_channel }}"
+            send_resolved: true
+      - name: "null"
+{% endif %}

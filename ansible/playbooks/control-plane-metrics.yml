@@ -1,0 +1,25 @@
+# Metriche del control plane esposte fuori da 127.0.0.1 (richiesto dall'addon monitoring).
+# Default kubeadm: scheduler, controller-manager, etcd (metriche) e kube-proxy ascoltano
+# solo su 127.0.0.1 → con kube-prometheus-stack scattano KubeSchedulerDown,
+# KubeControllerManagerDown, KubeProxyDown, etcdMembersDown... (falsi allarmi).
+---
+- name: Control plane metrics — ConfigMaps (persistenza per upgrade e join)
+  hosts: control_plane[0]
+  gather_facts: false
+  tasks:
+    - name: Patch ConfigMaps
+      ansible.builtin.include_role:
+        name: control-plane-metrics
+        tasks_from: configmaps
+
+- name: Control plane metrics — static pod manifests (un CP alla volta)
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Patch manifests
+      ansible.builtin.include_role:
+        name: control-plane-metrics
+        tasks_from: manifests

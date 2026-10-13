@@ -1,0 +1,15 @@
+# Metriche di Longhorn (volumi degradati, spazio sui nodi) — guida observability, passo 8
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: longhorn
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: longhorn-manager
+  namespaceSelector:
+    matchNames:
+      - longhorn-system
+  endpoints:
+    - port: manager

@@ -1,0 +1,3 @@
+# defaults file for monitoring — i valori reali arrivano da runner.py (extra-vars)
+---
+monitoring_namespace: monitoring

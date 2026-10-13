@@ -1,0 +1,284 @@
+# Dashboard "Log dei pod" (guida observability). Applicato così com'è con kubectl apply:
+# NON passare dal template Jinja (contiene {{pod}} nei legendFormat).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-log-pod
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  log-dei-pod.json: |
+    {
+      "title": "Log dei pod",
+      "uid": "pod-logs",
+      "schemaVersion": 39,
+      "editable": true,
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "refresh": "",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "loki",
+            "current": {}
+          },
+          {
+            "name": "namespace",
+            "label": "Namespace",
+            "type": "query",
+            "datasource": {
+              "type": "loki",
+              "uid": "${datasource}"
+            },
+            "query": {
+              "label": "namespace",
+              "stream": "",
+              "type": 1,
+              "refId": "LokiVariableQueryEditor-VariableQuery"
+            },
+            "definition": "label_values(namespace)",
+            "includeAll": true,
+            "allValue": ".+",
+            "multi": true,
+            "refresh": 2,
+            "sort": 1,
+            "current": {
+              "selected": true,
+              "text": [
+                "All"
+              ],
+              "value": [
+                "$__all"
+              ]
+            }
+          },
+          {
+            "name": "pod",
+            "label": "Pod",
+            "type": "query",
+            "datasource": {
+              "type": "loki",
+              "uid": "${datasource}"
+            },
+            "query": {
+              "label": "pod",
+              "stream": "{namespace=~\"$namespace\"}",
+              "type": 1,
+              "refId": "LokiVariableQueryEditor-VariableQuery"
+            },
+            "definition": "label_values({namespace=~\"$namespace\"}, pod)",
+            "includeAll": true,
+            "allValue": ".+",
+            "multi": true,
+            "refresh": 2,
+            "sort": 1,
+            "current": {
+              "selected": true,
+              "text": [
+                "All"
+              ],
+              "value": [
+                "$__all"
+              ]
+            }
+          },
+          {
+            "name": "container",
+            "label": "Container",
+            "type": "query",
+            "datasource": {
+              "type": "loki",
+              "uid": "${datasource}"
+            },
+            "query": {
+              "label": "container",
+              "stream": "{namespace=~\"$namespace\", pod=~\"$pod\"}",
+              "type": 1,
+              "refId": "LokiVariableQueryEditor-VariableQuery"
+            },
+            "definition": "label_values({namespace=~\"$namespace\", pod=~\"$pod\"}, container)",
+            "includeAll": true,
+            "allValue": ".+",
+            "multi": true,
+            "refresh": 2,
+            "sort": 1,
+            "current": {
+              "selected": true,
+              "text": [
+                "All"
+              ],
+              "value": [
+                "$__all"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "label": "Cerca testo (regex)",
+            "type": "textbox",
+            "query": "",
+            "current": {
+              "text": "",
+              "value": ""
+            }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Volume dei log per pod",
+          "datasource": {
+            "type": "loki",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${datasource}"
+              },
+              "queryType": "range",
+              "legendFormat": "{{pod}}",
+              "expr": "sum by (pod) (count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"(?i)$search\" [$__interval]))"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 80,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Righe di errore per pod (error|exception|fatal|panic)",
+          "datasource": {
+            "type": "loki",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${datasource}"
+              },
+              "queryType": "range",
+              "legendFormat": "{{pod}}",
+              "expr": "sum by (pod) (count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"(?i)$search\" |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 80,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "type": "logs",
+          "title": "Log",
+          "datasource": {
+            "type": "loki",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 7,
+            "w": 24,
+            "h": 18
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "dedupStrategy": "none"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${datasource}"
+              },
+              "queryType": "range",
+              "expr": "{namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"(?i)$search\"",
+              "maxLines": 2000
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "logs",
+          "title": "Eventi Kubernetes del namespace",
+          "datasource": {
+            "type": "loki",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 25,
+            "w": 24,
+            "h": 10
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "enableLogDetails": true,
+            "dedupStrategy": "none"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${datasource}"
+              },
+              "queryType": "range",
+              "expr": "{job=\"loki.source.kubernetes_events\", namespace=~\"$namespace\"} |~ \"$pod\""
+            }
+          ]
+        }
+      ]
+    }

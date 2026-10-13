@@ -1,0 +1,164 @@
+# tasks file for monitoring — guida observability (kube-prometheus-stack, Loki, Alloy)
+# Tutte le task girano sulla bootstrap (Helm + kubeconfig del cluster).
+# Adotta un'installazione manuale esistente: stessi nomi di release, namespace e
+# StorageClass della guida; StorageClass creata solo se assente; password Grafana
+# riletta dal Secret esistente se GRAFANA_ADMIN_PASSWORD è vuota.
+---
+- name: Monitoring on bootstrap machine
+  delegate_to: localhost
+  become: false
+  run_once: true
+  environment:
+    KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+  block:
+    - name: Create monitoring namespace
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl create namespace {{ monitoring_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+      args:
+        executable: /bin/bash
+      register: _mon_ns
+      changed_when: "'created' in _mon_ns.stdout"
+
+    # --- Password Grafana -------------------------------------------------
+    - name: Read existing Grafana admin password
+      ansible.builtin.command: >
+        kubectl -n {{ monitoring_namespace }} get secret kube-prometheus-stack-grafana
+        -o jsonpath={.data.admin-password}
+      register: _mon_grafana_secret
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    # Priorità: .env > Secret esistente > nuova password generata
+    - name: Set Grafana admin password
+      ansible.builtin.set_fact:
+        _grafana_admin_password: >-
+          {{ monitoring_grafana_admin_password
+             or (_mon_grafana_secret.stdout | b64decode if _mon_grafana_secret.rc == 0 and _mon_grafana_secret.stdout else '')
+             or lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits'], length=24) }}
+      no_log: true
+
+    # --- Storage ------------------------------------------------------------
+    - name: Check longhorn-monitoring StorageClass
+      ansible.builtin.command: kubectl get storageclass longhorn-monitoring
+      register: _mon_sc
+      changed_when: false
+      failed_when: false
+      when: monitoring_create_longhorn_sc | bool
+
+    - name: Render longhorn-monitoring StorageClass
+      ansible.builtin.template:
+        src: longhorn-monitoring-sc.yaml.j2
+        dest: "/tmp/fun-kube-{{ cluster_name }}-longhorn-monitoring-sc.yaml"
+        mode: '0644'
+      when:
+        - monitoring_create_longhorn_sc | bool
+        - _mon_sc.rc != 0
+
+    - name: Create longhorn-monitoring StorageClass
+      ansible.builtin.command: kubectl apply -f /tmp/fun-kube-{{ cluster_name }}-longhorn-monitoring-sc.yaml
+      changed_when: true
+      when:
+        - monitoring_create_longhorn_sc | bool
+        - _mon_sc.rc != 0
+
+    - name: Get StorageClass provisioner and replicas
+      ansible.builtin.command: >
+        kubectl get storageclass {{ monitoring_storage_class }}
+        -o jsonpath={.provisioner}/{.parameters.numberOfReplicas}
+      register: _mon_sc_info
+      changed_when: false
+
+    # Prima dell'installazione: con spazio insufficiente Longhorn lascia i volumi
+    # faulted e i pod in Init:0/1. Solo i PVC non ancora esistenti vengono contati.
+    - name: Check Longhorn capacity for monitoring volumes
+      ansible.builtin.command: >
+        {{ ansible_playbook_python }} {{ role_path }}/files/longhorn_capacity.py
+        {{ _mon_sc_info.stdout.split('/')[1] | default('1', true) }} {{ monitoring_namespace }}
+        prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0={{ monitoring_prom_storage_bytes }}
+        storage-loki-0={{ monitoring_loki_storage_bytes }}
+        kube-prometheus-stack-grafana={{ monitoring_grafana_storage_bytes }}
+        alertmanager-kube-prometheus-stack-alertmanager-db-alertmanager-kube-prometheus-stack-alertmanager-0={{ monitoring_alertmanager_storage_bytes }}
+      register: _mon_capacity
+      changed_when: false
+      failed_when: false
+      when: _mon_sc_info.stdout.startswith('driver.longhorn.io')
+
+    - name: Fail if Longhorn capacity is insufficient
+      ansible.builtin.fail:
+        msg: "{{ _mon_capacity.stdout }}"
+      when:
+        - _mon_capacity is not skipped
+        - _mon_capacity.rc != 0
+
+    # --- Helm ---------------------------------------------------------------
+    - name: Add Helm repositories
+      ansible.builtin.command: helm repo add {{ item.name }} {{ item.url }} --force-update
+      loop:
+        - {name: prometheus-community, url: "https://prometheus-community.github.io/helm-charts"}
+        - {name: grafana-community, url: "https://grafana-community.github.io/helm-charts"}
+        - {name: grafana, url: "https://grafana.github.io/helm-charts"}
+      changed_when: false
+
+    - name: Update Helm repositories
+      ansible.builtin.command: helm repo update prometheus-community grafana-community grafana
+      changed_when: false
+
+    # helm upgrade non aggiorna i CRD: si applicano prima, server-side (alcuni CRD di
+    # Prometheus Operator superano il limite dell'annotation del client-side apply).
+    - name: Apply Prometheus Operator CRDs
+      ansible.builtin.shell: |
+        set -o pipefail
+        helm show crds prometheus-community/kube-prometheus-stack --version {{ kps_chart_version }} \
+          | kubectl apply --server-side --force-conflicts -f -
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Render values files
+      ansible.builtin.template:
+        src: "{{ item }}.yaml.j2"
+        dest: "/tmp/fun-kube-{{ cluster_name }}-{{ item }}.yaml"
+        mode: '0600'
+      loop: [kps-values, loki-values, alloy-logs-values, alloy-events-values]
+
+    - name: Install/upgrade Helm releases
+      ansible.builtin.command: >
+        helm upgrade --install {{ item.release }} {{ item.chart }}
+        --namespace {{ monitoring_namespace }}
+        --version {{ item.version }}
+        --values /tmp/fun-kube-{{ cluster_name }}-{{ item.values }}.yaml
+        --wait --timeout {{ item.timeout }}
+      loop:
+        - {release: kube-prometheus-stack, chart: prometheus-community/kube-prometheus-stack,
+           version: "{{ kps_chart_version }}", values: kps-values, timeout: 15m}
+        - {release: loki, chart: grafana-community/loki,
+           version: "{{ loki_chart_version }}", values: loki-values, timeout: 10m}
+        - {release: alloy-logs, chart: grafana/alloy,
+           version: "{{ alloy_chart_version }}", values: alloy-logs-values, timeout: 10m}
+        - {release: alloy-events, chart: grafana/alloy,
+           version: "{{ alloy_chart_version }}", values: alloy-events-values, timeout: 10m}
+      loop_control:
+        label: "{{ item.release }} {{ item.version }}"
+      changed_when: true
+
+    - name: Apply Longhorn ServiceMonitor
+      ansible.builtin.command: kubectl apply -f {{ role_path }}/files/longhorn-servicemonitor.yaml
+      register: _mon_lh_sm
+      changed_when: "'unchanged' not in _mon_lh_sm.stdout"
+      when: longhorn_enabled | default(false) | bool
+
+    # Copiata così com'è (non template): contiene {{pod}} nei legendFormat
+    - name: Apply "Log dei pod" dashboard
+      ansible.builtin.command: kubectl apply -f {{ role_path }}/files/dashboard-log-pod.yaml
+      register: _mon_dash
+      changed_when: "'unchanged' not in _mon_dash.stdout"
+
+  always:
+    # i values contengono la password di Grafana (e l'eventuale webhook Slack)
+    - name: Remove rendered files
+      ansible.builtin.file:
+        path: "/tmp/fun-kube-{{ cluster_name }}-{{ item }}.yaml"
+        state: absent
+      loop: [kps-values, loki-values, alloy-logs-values, alloy-events-values, longhorn-monitoring-sc]

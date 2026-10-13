@@ -50,6 +50,7 @@ Se non definisci worker, i nodi control-plane vengono detaintati automaticamente
 | Nginx Proxy Manager | `INGRESS_TYPE=nginx-proxy-manager` | Ingress con UI web, DaemonSet, LB o NodePort |
 | Longhorn | `LONGHORN_ENABLED=true` | Storage distribuito, RWO e RWX |
 | DN-essence | `DN_ESSENCE_ENABLED=true` *(default)* | DNS rewrite manager per CoreDNS, UI web inclusa |
+| Monitoring | `MONITORING_ENABLED=true` | Prometheus, Alertmanager, Grafana, Loki (log + eventi), alert pronti |
 
 > Solo uno tra Traefik e Nginx Proxy Manager può essere attivo alla volta.
 
@@ -348,6 +349,49 @@ Per disabilitare completamente: `DN_ESSENCE_ENABLED=false`.
 
 ---
 
+### Monitoring
+
+```ini
+MONITORING_ENABLED=true
+GRAFANA_DOMAIN=grafana.cluster.dominio.it
+GRAFANA_EXPOSE=auto
+```
+
+Installa nel namespace `monitoring` (versioni in `fun_kube/versions.py`):
+
+| Componente | Ruolo |
+|---|---|
+| kube-prometheus-stack | Prometheus, Alertmanager, Grafana, kube-state-metrics, node-exporter, alert Kubernetes |
+| Loki (monolitico) | archivio dei log su volume persistente |
+| Alloy (DaemonSet) | log di tutti i pod, control-plane compresi |
+| Alloy (1 replica) | eventi Kubernetes (Kubernetes li conserva solo ~1 ora) |
+| ServiceMonitor Longhorn | metriche di volumi e dischi (se Longhorn è abilitato) |
+| Dashboard "Log dei pod" | log per namespace/pod/container con ricerca, errori ed eventi |
+
+**Esposizione di Grafana** (`GRAFANA_EXPOSE=auto`): con Traefik crea un Ingress su
+`GRAFANA_DOMAIN` (Let's Encrypt se `TRAEFIK_ACME_EMAIL` è impostato); con Nginx Proxy Manager
+resta ClusterIP e il file di manutenzione indica il Proxy Host da creare; senza ingress usa
+LoadBalancer (MetalLB) o NodePort. Prometheus e Alertmanager non vengono mai pubblicati
+(nessuna autenticazione): si usano con `kubectl port-forward`.
+
+**Storage**: con Longhorn crea la StorageClass `longhorn-monitoring` (max 2 repliche, `Retain`) e
+verifica prima che ci sia spazio prenotabile: i default (30+20+5+2 GiB) × 2 repliche richiedono
+~114 GiB sui dischi Longhorn. Sul mononodo usa local-path. Le dimensioni non si possono
+cambiare dopo l'installazione.
+
+**Metriche del control plane**: kubeadm le espone solo su `127.0.0.1`; con il monitoring
+abilitato Fun-Kube le porta su `0.0.0.0` (scheduler, controller-manager, etcd, kube-proxy),
+anche nella configurazione di kubeadm, così restano dopo `upgrade` e nei nuovi CP. Senza,
+`KubeSchedulerDown`, `etcdMembersDown` e simili scatterebbero sempre.
+
+**Installazione esistente** fatta a mano con la guida: viene adottata (stessi nomi di
+release, namespace e StorageClass). `up` si ferma se le dimensioni dei volumi nel `.env` non
+corrispondono a quelle esistenti, e rilegge la password di Grafana dal cluster.
+
+`MONITORING_ENABLED=false` non disinstalla: la procedura è nel file di manutenzione.
+
+---
+
 ## CIDR — regole di non sovrapposizione
 
 | Variabile | Uso | Esempio |
@@ -489,6 +533,8 @@ Fun-Kube/
     │   ├── cert-renewal.yml           # systemd timer rinnovo certificati
     │   ├── local-path-provisioner.yml # StorageClass default (mononodo only)
     │   ├── bootstrap-kubeconfig.yml   # kubeconfig SA non-scadente
+    │   ├── control-plane-metrics.yml  # metriche control plane su 0.0.0.0 (monitoring)
+    │   ├── monitoring.yml             # Prometheus, Grafana, Loki, Alloy
     │   ├── metallb.yml
     │   ├── longhorn.yml
     │   ├── ingress.yml                # Traefik o Nginx Proxy Manager

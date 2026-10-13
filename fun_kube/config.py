@@ -74,6 +74,28 @@ class DnEssenceConfig:
     version: str      # vuoto = ultima versione dal registry OCI
 
 
+@dataclass
+class MonitoringConfig:
+    enabled: bool
+    grafana_domain: str            # root_url + host dell'Ingress (vuoto = nessun root_url)
+    grafana_admin_password: str    # vuoto = generata alla prima installazione / letta dal Secret
+    grafana_expose: str            # dopo la risoluzione: ingress | clusterip | nodeport | loadbalancer
+    grafana_expose_requested: str  # valore del .env (auto o esplicito)
+    grafana_nodeport: int
+    grafana_lb_ip: str
+    storage_class: str             # dopo la risoluzione: nome della StorageClass
+    create_longhorn_sc: bool       # True = Fun-Kube crea longhorn-monitoring (se assente)
+    prom_retention: str
+    prom_retention_size: str
+    prom_storage: str
+    loki_retention: str
+    loki_storage: str
+    grafana_storage: str
+    alertmanager_storage: str
+    slack_webhook: str
+    slack_channel: str
+
+
 Topology = Literal["single-node", "single-cp", "ha"]
 
 
@@ -92,6 +114,7 @@ class ClusterConfig:
     ingress: IngressConfig
     longhorn: LonghornConfig
     dn_essence: DnEssenceConfig
+    monitoring: MonitoringConfig
     topology: Topology
     output_dir: Path
     log_level: str
@@ -131,6 +154,19 @@ class ClusterConfig:
         I nodi schedulabili sono i worker, o i CP se untainted (nessun worker)."""
         schedulable = len(self.workers) if self.workers else len(self.control_planes)
         return min(schedulable, 3)
+
+    @property
+    def monitoring_sc_replicas(self) -> int:
+        """Repliche della StorageClass longhorn-monitoring: metriche e log sono dati
+        sacrificabili con molte scritture → al massimo 2."""
+        return min(2, self.longhorn_replicas)
+
+    @property
+    def monitoring_required_bytes(self) -> int:
+        """Spazio richiesto dai 4 volumi del monitoring (una replica)."""
+        m = self.monitoring
+        return sum(quantity_bytes(q) for q in (m.prom_storage, m.loki_storage,
+                                                m.grafana_storage, m.alertmanager_storage))
 
     @property
     def effective_ingress_service_type(self) -> str:
@@ -194,6 +230,7 @@ def load(env_file: Path) -> ClusterConfig:
             ui_nodeport=int(env.get("DN_ESSENCE_UI_NODEPORT", "30880") or "30880"),
             version=env.get("DN_ESSENCE_VERSION", "").strip(),
         ),
+        monitoring=_parse_monitoring(env),
         topology=topology,
         output_dir=Path(env.get("OUTPUT_DIR", "./output")),
         log_level=env.get("LOG_LEVEL", "info").lower(),
@@ -203,6 +240,7 @@ def load(env_file: Path) -> ClusterConfig:
         config_warnings=[],
     )
 
+    _resolve_monitoring(cfg)
     cfg.config_warnings.extend(_validate(cfg))
     if cfg.k8s_version != "latest":
         addons = ["calico", "cert-manager", "metrics-server"]
@@ -326,6 +364,74 @@ def _parse_extra_sans(env: dict) -> List[str]:
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 
+def _str(env: dict, key: str, default: str = "") -> str:
+    return (env.get(key) or "").strip() or default
+
+
+def _parse_monitoring(env: dict) -> MonitoringConfig:
+    expose = _str(env, "GRAFANA_EXPOSE", "auto").lower()
+    if expose not in ("auto", "ingress", "clusterip", "nodeport", "loadbalancer"):
+        raise ConfigError(
+            f"GRAFANA_EXPOSE deve essere auto | ingress | clusterip | nodeport | loadbalancer, "
+            f"trovato: '{expose}'"
+        )
+    return MonitoringConfig(
+        enabled=_bool(env, "MONITORING_ENABLED"),
+        grafana_domain=_str(env, "GRAFANA_DOMAIN"),
+        grafana_admin_password=_str(env, "GRAFANA_ADMIN_PASSWORD"),
+        grafana_expose=expose,
+        grafana_expose_requested=expose,
+        grafana_nodeport=int(_str(env, "GRAFANA_NODEPORT", "30300")),
+        grafana_lb_ip=_str(env, "GRAFANA_LB_IP"),
+        storage_class=_str(env, "MONITORING_STORAGE_CLASS", "auto"),
+        create_longhorn_sc=False,
+        prom_retention=_str(env, "PROM_RETENTION", "15d"),
+        prom_retention_size=_str(env, "PROM_RETENTION_SIZE", "25GB"),
+        prom_storage=_str(env, "PROM_STORAGE", "30Gi"),
+        loki_retention=_str(env, "LOKI_RETENTION", "168h"),
+        loki_storage=_str(env, "LOKI_STORAGE", "20Gi"),
+        grafana_storage=_str(env, "GRAFANA_STORAGE", "5Gi"),
+        alertmanager_storage=_str(env, "ALERTMANAGER_STORAGE", "2Gi"),
+        slack_webhook=_str(env, "ALERTMANAGER_SLACK_WEBHOOK"),
+        slack_channel=_str(env, "ALERTMANAGER_SLACK_CHANNEL", "#alert-k8s"),
+    )
+
+
+def _resolve_monitoring(cfg: "ClusterConfig") -> None:
+    """Risolve i valori 'auto' del monitoring in base al resto della configurazione."""
+    m = cfg.monitoring
+    if not m.enabled:
+        return
+    if m.grafana_expose == "auto":
+        if cfg.ingress.enabled and cfg.ingress.type == "traefik":
+            m.grafana_expose = "ingress"         # Ingress Traefik su GRAFANA_DOMAIN
+        elif cfg.ingress.enabled and cfg.ingress.type == "nginx-proxy-manager":
+            m.grafana_expose = "clusterip"       # NPM nel cluster raggiunge il Service
+        elif cfg.metallb.enabled:
+            m.grafana_expose = "loadbalancer"    # NPM/proxy esterno → IP MetalLB
+        else:
+            m.grafana_expose = "nodeport"        # NPM/proxy esterno → IP nodo:NodePort
+    if m.storage_class == "auto":
+        if cfg.longhorn.enabled:
+            m.storage_class = "longhorn-monitoring"
+            m.create_longhorn_sc = True
+        elif cfg.topology == "single-node":
+            m.storage_class = "local-path"
+        # altrimenti resta "auto": errore in _validate (nessuno storage persistente)
+
+
+def quantity_bytes(q: str) -> int:
+    """'30Gi' / '25GB' / '512Mi' → byte. Unità binarie (come retentionSize di Prometheus,
+    dove 1GB = 1024^3). Solleva ValueError se il formato non è valido."""
+    import re
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGTPE]i?B?|B)?\s*", q)
+    if not m:
+        raise ValueError(q)
+    unit = (m.group(2) or "B").rstrip("B").rstrip("i") or "B"
+    power = {"B": 0, "K": 1, "M": 2, "G": 3, "T": 4, "P": 5, "E": 6}[unit]
+    return int(float(m.group(1)) * 1024 ** power)
+
+
 def _parse_ingress(env: dict) -> IngressConfig:
     enabled = _bool(env, "INGRESS_ENABLED")
     ingress_type = env.get("INGRESS_TYPE", "nginx-proxy-manager").strip().lower()
@@ -425,6 +531,57 @@ def _validate(cfg: ClusterConfig) -> List[str]:
             f"Longhorn: {cfg.longhorn_replicas} nodi schedulabili — repliche impostate a "
             f"{cfg.longhorn_replicas} ({redundancy})."
         )
+
+    # Monitoring
+    m = cfg.monitoring
+    if m.enabled:
+        if m.grafana_expose == "ingress":
+            if not (cfg.ingress.enabled and cfg.ingress.type == "traefik"):
+                errors.append("GRAFANA_EXPOSE=ingress richiede INGRESS_ENABLED=true e INGRESS_TYPE=traefik.")
+            if not m.grafana_domain:
+                errors.append("GRAFANA_EXPOSE=ingress richiede GRAFANA_DOMAIN (host dell'Ingress).")
+        if m.grafana_expose == "loadbalancer" and not cfg.metallb.enabled:
+            errors.append("GRAFANA_EXPOSE=loadbalancer richiede METALLB_ENABLED=true.")
+        if m.grafana_expose == "nodeport":
+            if not 30000 <= m.grafana_nodeport <= 32767:
+                errors.append(f"GRAFANA_NODEPORT {m.grafana_nodeport} fuori dal range 30000-32767.")
+            used = {}
+            if cfg.ingress.enabled and cfg.effective_ingress_service_type == "nodeport":
+                if cfg.ingress.type == "traefik":
+                    used.update({cfg.ingress.traefik_http_nodeport: "TRAEFIK_HTTP_NODEPORT",
+                                 cfg.ingress.traefik_https_nodeport: "TRAEFIK_HTTPS_NODEPORT"})
+                else:
+                    used.update({cfg.ingress.npm_http_nodeport: "NPM_HTTP_NODEPORT",
+                                 cfg.ingress.npm_https_nodeport: "NPM_HTTPS_NODEPORT",
+                                 cfg.ingress.npm_admin_nodeport: "NPM_ADMIN_NODEPORT"})
+            if cfg.longhorn.enabled and cfg.longhorn.ui_nodeport:
+                used[cfg.longhorn.ui_nodeport] = "LONGHORN_UI_NODEPORT"
+            if cfg.dn_essence.enabled and cfg.dn_essence.ui_nodeport:
+                used[cfg.dn_essence.ui_nodeport] = "DN_ESSENCE_UI_NODEPORT"
+            if m.grafana_nodeport in used:
+                errors.append(f"GRAFANA_NODEPORT {m.grafana_nodeport} già usata da {used[m.grafana_nodeport]}.")
+        if m.storage_class == "auto":
+            errors.append(
+                "Monitoring su cluster multi-nodo senza Longhorn: nessuno storage persistente.\n"
+                "  Abilitare LONGHORN_ENABLED=true oppure indicare MONITORING_STORAGE_CLASS."
+            )
+        try:
+            if quantity_bytes(m.prom_retention_size) >= quantity_bytes(m.prom_storage):
+                errors.append(
+                    f"PROM_RETENTION_SIZE ({m.prom_retention_size}) deve essere minore di "
+                    f"PROM_STORAGE ({m.prom_storage})."
+                )
+            for key, val in (("PROM_STORAGE", m.prom_storage), ("LOKI_STORAGE", m.loki_storage),
+                             ("GRAFANA_STORAGE", m.grafana_storage),
+                             ("ALERTMANAGER_STORAGE", m.alertmanager_storage)):
+                quantity_bytes(val)
+        except ValueError as e:
+            errors.append(f"Dimensione non valida nelle variabili del monitoring: '{e}' (es. 30Gi, 25GB).")
+        if cfg.topology == "single-node":
+            warnings.append(
+                "Monitoring su mononodo: lo stack richiede circa 2-3 GB di RAM in più e "
+                f"{m.prom_storage}+{m.loki_storage}+{m.grafana_storage}+{m.alertmanager_storage} di disco."
+            )
 
     # Controlli CIDR
     try:

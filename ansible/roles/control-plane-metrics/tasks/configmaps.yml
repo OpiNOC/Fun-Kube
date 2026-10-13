@@ -1,0 +1,42 @@
+# Opzioni persistenti nei ConfigMap: kubeadm-config (letto da `kubeadm upgrade` e dai join
+# dei nuovi CP, che altrimenti rigenererebbero i manifest con 127.0.0.1) e kube-proxy.
+# Eseguito sulla bootstrap con l'interprete di Ansible (PyYAML disponibile).
+---
+- name: Patch kubeadm-config and kube-proxy ConfigMaps
+  ansible.builtin.shell: |
+    set -o pipefail
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    kubectl -n kube-system get cm {{ item.cm }} -o jsonpath='{.data.{{ item.key }}}' > "$tmp/in.yaml"
+    result=$("{{ ansible_playbook_python }}" "{{ role_path }}/files/metrics_config.py" {{ item.mode }} "$tmp/in.yaml" "$tmp/patch.json")
+    if [ "$result" = "changed" ]; then
+      kubectl -n kube-system patch cm {{ item.cm }} --type merge --patch-file "$tmp/patch.json" >/dev/null
+    fi
+    echo "$result"
+  args:
+    executable: /bin/bash
+  loop:
+    - {cm: kubeadm-config, key: 'ClusterConfiguration', mode: clusterconfig}
+    - {cm: kube-proxy, key: 'config\.conf', mode: kubeproxy}
+  environment:
+    KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: _cpm_cm
+  changed_when: "'changed' in _cpm_cm.stdout"
+
+# kube-proxy legge la configurazione solo all'avvio
+- name: Restart kube-proxy to apply metricsBindAddress
+  ansible.builtin.shell: |
+    kubectl -n kube-system rollout restart daemonset/kube-proxy
+    kubectl -n kube-system rollout status daemonset/kube-proxy --timeout=300s
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: "/root/.kube/{{ cluster_name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: true
+  when: "'changed' in _cpm_cm.results[1].stdout"

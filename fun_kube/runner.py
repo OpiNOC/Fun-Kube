@@ -136,6 +136,9 @@ def write_output(cluster: ClusterConfig) -> None:
     if cluster.dn_essence.enabled:
         lines += _dn_essence_output_lines(cluster)
 
+    if cluster.monitoring.enabled:
+        lines += [""] + _monitoring_lines(cluster, short=True)
+
     lines += [
         "",
         "# Troubleshooting",
@@ -332,6 +335,9 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
     if cluster.dn_essence.enabled:
         lines += ["", ""] + _dn_essence_maintenance_lines(cluster)
 
+    if cluster.monitoring.enabled:
+        lines += ["", ""] + _monitoring_lines(cluster, short=False)
+
     dest = Path(f"/root/{cluster.cluster_name}-manutenzione.txt")
     dest.write_text("\n".join(lines) + "\n")
     console.print(f"  [green]✓[/]  file manutenzione → {dest}")
@@ -386,6 +392,11 @@ def _build_playbook_sequence(cluster: ClusterConfig) -> List[str]:
 
     if cluster.dn_essence.enabled:
         playbooks.append("dn-essence.yml")
+
+    # Dopo longhorn/ingress: servono la StorageClass e (modalità ingress) Traefik.
+    if cluster.monitoring.enabled:
+        playbooks.append("control-plane-metrics.yml")
+        playbooks.append("monitoring.yml")
 
     return playbooks
 
@@ -508,7 +519,41 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict
         "dn_essence_ui_nodeport": cluster.dn_essence.ui_nodeport,
         "dn_essence_version": cluster.dn_essence.version,
         "dn_essence_namespace": "dn-essence",
+        # Monitoring
+        **_monitoring_vars(cluster),
     }
+
+
+def _monitoring_vars(cluster: ClusterConfig) -> dict:
+    from .config import quantity_bytes
+    m = cluster.monitoring
+    out = {"monitoring_enabled": m.enabled}
+    if not m.enabled:
+        return out
+    out.update({
+        "monitoring_grafana_domain": m.grafana_domain,
+        "monitoring_grafana_admin_password": m.grafana_admin_password,
+        "monitoring_grafana_expose": m.grafana_expose,
+        "monitoring_grafana_nodeport": m.grafana_nodeport,
+        "monitoring_grafana_lb_ip": m.grafana_lb_ip,
+        "monitoring_storage_class": m.storage_class,
+        "monitoring_create_longhorn_sc": m.create_longhorn_sc,
+        "monitoring_sc_replicas": cluster.monitoring_sc_replicas,
+        "monitoring_prom_retention": m.prom_retention,
+        "monitoring_prom_retention_size": m.prom_retention_size,
+        "monitoring_prom_storage": m.prom_storage,
+        "monitoring_loki_retention": m.loki_retention,
+        "monitoring_loki_storage": m.loki_storage,
+        "monitoring_grafana_storage": m.grafana_storage,
+        "monitoring_alertmanager_storage": m.alertmanager_storage,
+        "monitoring_prom_storage_bytes": quantity_bytes(m.prom_storage),
+        "monitoring_loki_storage_bytes": quantity_bytes(m.loki_storage),
+        "monitoring_grafana_storage_bytes": quantity_bytes(m.grafana_storage),
+        "monitoring_alertmanager_storage_bytes": quantity_bytes(m.alertmanager_storage),
+        "monitoring_slack_webhook": m.slack_webhook,
+        "monitoring_slack_channel": m.slack_channel,
+    })
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -750,6 +795,92 @@ def _ingress_maintenance_lines(cluster: "ClusterConfig") -> list:
             "  4. kubectl -n npm-system rollout restart daemonset/nginx-proxy-manager",
             "     (i pod leggono il Secret solo all'avvio)",
         ]
+    return lines
+
+
+def grafana_access(cluster: "ClusterConfig") -> tuple:
+    """(url Grafana, target del proxy NPM o None) secondo GRAFANA_EXPOSE."""
+    m = cluster.monitoring
+    if m.grafana_expose == "ingress":
+        scheme = "https" if cluster.ingress.traefik_acme_email else "http"
+        return f"{scheme}://{m.grafana_domain}", None
+    if m.grafana_expose == "nodeport":
+        target = f"{cluster.api_endpoint}:{m.grafana_nodeport}"
+    elif m.grafana_expose == "loadbalancer":
+        target = f"{m.grafana_lb_ip or '<IP MetalLB: kubectl -n monitoring get svc kube-prometheus-stack-grafana>'}:80"
+    else:
+        target = "kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80"
+    url = f"https://{m.grafana_domain}" if m.grafana_domain else f"http://{target}"
+    return url, target
+
+
+def _monitoring_lines(cluster: "ClusterConfig", short: bool) -> list:
+    m = cluster.monitoring
+    url, target = grafana_access(cluster)
+    pw_cmd = ("kubectl -n monitoring get secret kube-prometheus-stack-grafana "
+              "-o jsonpath='{.data.admin-password}' | base64 -d; echo")
+    if short:
+        return [
+            "# Monitoring (Prometheus, Grafana, Loki)",
+            f"Grafana:         {url}   (utente admin)",
+            f"Esposizione:     {m.grafana_expose}" + (f" → proxy NPM verso {target}" if target else ""),
+            f"Password admin:  {pw_cmd}",
+            "kubectl -n monitoring get pods",
+        ]
+    lines = [
+        "ADDON — Monitoring (kube-prometheus-stack, Loki, Alloy)",
+        "-" * 40,
+        "",
+        "Namespace:      monitoring",
+        f"Grafana:        {url}   (utente admin)",
+        f"Esposizione:    {m.grafana_expose}",
+        f"StorageClass:   {m.storage_class}",
+        f"Retention:      Prometheus {m.prom_retention} / {m.prom_retention_size}, Loki {m.loki_retention}",
+        f"Volumi:         Prometheus {m.prom_storage}, Loki {m.loki_storage}, "
+        f"Grafana {m.grafana_storage}, Alertmanager {m.alertmanager_storage}",
+        f"Versioni chart: kube-prometheus-stack {versions.KUBE_PROMETHEUS_STACK_CHART_VERSION}, "
+        f"loki {versions.LOKI_CHART_VERSION}, alloy {versions.ALLOY_CHART_VERSION}",
+        f"Notifiche:      {'Slack ' + m.slack_channel if m.slack_webhook else 'nessuna (ALERTMANAGER_SLACK_WEBHOOK vuoto)'}",
+        "",
+        "Password admin Grafana (Grafana la conserva nel suo database: cambiarla da",
+        "Administration → Users, non dal .env dopo la prima installazione):",
+        f"  {pw_cmd}",
+    ]
+    if target:
+        lines += [
+            "",
+            "Proxy Host su Nginx Proxy Manager (Hosts → Proxy Hosts → Add Proxy Host):",
+            f"  Domain Names:        {m.grafana_domain or '<dominio Grafana>'}",
+            "  Scheme:              http",
+            f"  Forward Host / Port: {target}",
+            "  Block Common Exploits e Websockets Support: attivi (Websockets obbligatorio)",
+            "  SSL: Request a new SSL Certificate, Force SSL, HTTP/2",
+        ]
+        if m.grafana_expose == "nodeport":
+            lines += [
+                "  La NodePort risponde su tutti i nodi: limitare sul firewall l'accesso alla",
+                f"  porta {m.grafana_nodeport} al solo IP della macchina NPM.",
+            ]
+    lines += [
+        "",
+        "Prometheus e Alertmanager non hanno autenticazione: NON pubblicarli, usare:",
+        "  kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090",
+        "  kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093",
+        "",
+        "Metriche del control plane: scheduler, controller-manager, etcd (2381) e kube-proxy",
+        "(10249) ascoltano su 0.0.0.0 (impostato da Fun-Kube anche in kubeadm-config).",
+        "",
+        "Verifica:",
+        "  helm list -n monitoring          # 4 release deployed",
+        "  kubectl get pods,pvc -n monitoring",
+        "  Grafana → Dashboards → \"Log dei pod\" e \"Kubernetes / Compute Resources / Pod\"",
+        "",
+        "Disinstallazione (MONITORING_ENABLED=false NON rimuove nulla):",
+        "  kubectl delete -f ansible/roles/monitoring/files/longhorn-servicemonitor.yaml --ignore-not-found",
+        "  helm uninstall alloy-events alloy-logs loki kube-prometheus-stack -n monitoring",
+        "  kubectl delete namespace monitoring",
+        "  # longhorn-monitoring ha reclaimPolicy Retain: i PV restano (kubectl get pv | grep monitoring)",
+    ]
     return lines
 
 

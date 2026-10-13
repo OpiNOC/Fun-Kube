@@ -70,6 +70,8 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | ansible/roles/traefik         | ✓ implementato — DaemonSet, LB/NodePort, dashboard, LE, externalTrafficPolicy:Local (Test 7) |
 | ansible/roles/nginx-proxy-manager | ✓ implementato — DaemonSet, LB/NodePort, multi/single-node, externalTrafficPolicy:Local (Test 8) |
 | ansible/roles/longhorn        | ✓ testato (Test 9)                   |
+| ansible/roles/monitoring      | implementato — kube-prometheus-stack, Loki, Alloy, dashboard log, check capienza Longhorn — DA TESTARE |
+| ansible/roles/control-plane-metrics | implementato — metriche scheduler/controller-manager/etcd/kube-proxy su 0.0.0.0 — DA TESTARE |
 | ansible/roles/dn-essence      | ✓ implementato — Helm OCI, NodePort/ClusterIP, default enabled; fix delegate_to: localhost |
 | .env.example                  | ✓ 3 CP + 3 worker (placeholder)|
 | bootstrap-setup.sh            | legacy — non più necessario    |
@@ -405,6 +407,42 @@ Test:
 
 ---
 
+### Addon monitoring — 2026-10-13 — DA TESTARE
+
+Dalla guida observability di Enrico (kube-prometheus-stack 91.8.2 / Loki 18.13.7 / Alloy 1.13.0
+installati a mano sul cluster OPI, creato con Fun-Kube). Scelte:
+- variabili con i nomi della guida (`GRAFANA_*`, `PROM_*`, `LOKI_*`, `ALERTMANAGER_*`) +
+  `MONITORING_ENABLED` e `MONITORING_STORAGE_CLASS`; default = valori in uso su OPI
+- `GRAFANA_EXPOSE=auto`: ingress (Traefik, modalità in più rispetto alla guida), clusterip
+  (NPM nel cluster), loadbalancer (MetalLB), nodeport
+- password Grafana: `.env` > Secret esistente > generata
+- adozione dell'installazione manuale: stessi nomi; StorageClass creata solo se assente; CRD
+  Prometheus Operator applicati server-side prima dell'upgrade (`helm show crds`); errore se le
+  dimensioni dei volumi nel `.env` differiscono dai PVC esistenti
+- **metriche del control plane**: su OPI scattavano da 13 giorni KubeSchedulerInstanceUnreachable,
+  KubeControllerManagerInstanceUnreachable, KubeProxyInstanceUnreachable, TargetDown,
+  etcdInsufficientMembers, etcdMembersDown (kubeadm le espone solo su 127.0.0.1) →
+  `control-plane-metrics.yml`: `kubeadm-config` (persistenza per upgrade e join), ConfigMap
+  kube-proxy, manifest statici un CP alla volta con attesa
+- controllo capienza Longhorn prima dell'installazione (`files/longhorn_capacity.py`): i
+  worker del lab (dischi 47 GiB → ~31 GiB prenotabili) NON bastano per i default (114 GiB)
+- limiti inotify (`/etc/sysctl.d/99-inotify.conf`) nel role `common` per tutti i cluster
+- versioni: kube-prometheus-stack 92.3.0 (91→92: solo nodeSelector linux, un riavvio),
+  Loki 18.15.1, Alloy 1.13.1
+
+Verificato offline: risoluzione `auto` e validazioni (12 scenari), patch kubeadm-config /
+kube-proxy (formato v1beta4, idempotente), replace dei manifest (idempotente, non tocca
+`--listen-client-urls`), check capienza (5 scenari), `helm template` dei 4 chart con i values
+generati in 5 scenari (Service/Ingress Grafana, root_url, retention, volumi, Slack, toleration).
+
+Test da fare:
+- **Test 22** — lab HA: `MONITORING_ENABLED=true` con dimensioni ridotte (dischi 47 GiB), poi
+  verificare alert del control plane spariti, dashboard "Log dei pod", eventi in Loki
+- **Test 23** — lab: dimensioni di default → `up` deve fermarsi sul controllo di capienza
+- **Test 24** — `fun-kube upgrade` su cluster con monitoring: le metriche del control plane
+  restano su 0.0.0.0 dopo `kubeadm upgrade`
+- **Test 25** — cluster OPI: adozione dell'installazione manuale (prima `--dry-run`)
+
 ## Prossimi passi / idee (2026-10-08)
 
 - **Test residui**: reset con il nuovo arresto pulito dei workload (verifica nessun processo
@@ -465,6 +503,8 @@ Fun-Kube/
 │   │   ├── cert-renewal.yml        # systemd timer rinnovo certificati
 │   │   ├── local-path-provisioner.yml  # StorageClass default (single-node)
 │   │   ├── bootstrap-kubeconfig.yml    # SA kubeconfig non-expiring
+│   │   ├── control-plane-metrics.yml # metriche control plane su 0.0.0.0 (monitoring)
+│   │   ├── monitoring.yml          # kube-prometheus-stack, Loki, Alloy
 │   │   ├── metallb.yml
 │   │   ├── longhorn.yml
 │   │   ├── ingress.yml
@@ -612,6 +652,7 @@ Prima del provisioning viene sempre mostrato un riepilogo con:
      → [longhorn.yml]     ← PRIMA di ingress (NPM usa SC longhorn/longhorn-rwx)
      → [ingress.yml]      ← Traefik o Nginx Proxy Manager
      → [dn-essence.yml]   ← default enabled; disabilitabile con DN_ESSENCE_ENABLED=false
+     → [control-plane-metrics.yml → monitoring.yml]   ← MONITORING_ENABLED=true
 5. output          fetch admin.conf, aggiorna ~/.bashrc, cluster-info.txt
 ```
 
