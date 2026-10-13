@@ -314,6 +314,11 @@ Funziona su qualsiasi numero di nodi. Il numero di repliche viene calcolato auto
 
 Fun-Kube mostra un avviso durante `up` se le repliche sono inferiori a 3.
 
+**Mononodo**: local-path è sempre installato ed è la StorageClass default. Longhorn su un solo
+nodo ha 1 replica (nessuna ridondanza in più di local-path) e circa 20 pod di overhead: ha
+senso per backup/snapshot dei volumi, volumi RWX o se prevedi di aggiungere worker. Se lo
+abiliti, la StorageClass default diventa `longhorn` (local-path resta disponibile).
+
 Prerequisiti (`nfs-common`, `open-iscsi`) installati automaticamente su tutti i nodi.
 
 ### DN-essence

@@ -411,10 +411,19 @@ def _validate(cfg: ClusterConfig) -> List[str]:
             )
 
     # Longhorn: avvisa se i nodi schedulabili sono meno di 3 (ridondanza ridotta)
-    if cfg.longhorn.enabled and cfg.longhorn_replicas < 3:
+    if cfg.longhorn.enabled and cfg.topology == "single-node":
         warnings.append(
-            f"Longhorn: solo {cfg.longhorn_replicas} nodo/i schedulabile/i — "
-            f"le repliche saranno impostate a {cfg.longhorn_replicas} (nessuna ridondanza)."
+            "Longhorn su mononodo: 1 replica, nessuna ridondanza rispetto a local-path, e circa\n"
+            "    20 pod di overhead. Utile per backup/snapshot dei volumi, volumi RWX o se prevedi\n"
+            "    di aggiungere worker; altrimenti local-path (sempre installato) è sufficiente.\n"
+            "    Con Longhorn abilitato la StorageClass default è longhorn."
+        )
+    elif cfg.longhorn.enabled and cfg.longhorn_replicas < 3:
+        redundancy = ("nessuna ridondanza" if cfg.longhorn_replicas == 1
+                      else "tollera la perdita di 1 nodo")
+        warnings.append(
+            f"Longhorn: {cfg.longhorn_replicas} nodi schedulabili — repliche impostate a "
+            f"{cfg.longhorn_replicas} ({redundancy})."
         )
 
     # Controlli CIDR
