@@ -459,7 +459,12 @@ Primo giro nel lab (2026-10-13, cluster nuovo HA 3 CP + 3 worker con NPM, Longho
   controllo reale: 18,2 GiB per worker) → stima al netto di NPM; default NPM ridotti
 - `helm upgrade` falliva: chiave `values` nel loop interpretata da Jinja come metodo `.values()`
   del dict → rinominata; ora l'intero role è verificato eseguendolo con kubectl/helm finti
-- provisioning in corso con volumi ridotti (il cluster ha i volumi NPM vecchi, 5+10 GiB)
+- installazione completata (volumi ridotti 6+6+1+1 GiB; NPM ha mantenuto i volumi vecchi 5+10
+  GiB senza errori): `diagnose` → **nessun alert attivo oltre a Watchdog** (metriche del
+  control plane OK, i falsi allarmi di OPI non compaiono), Grafana su LoadBalancer MetalLB con
+  l'IP mostrato a fine `up`, 4/4 PVC Bound, 20/20 pod Running. Da verificare in Grafana:
+  dashboard "Log dei pod", Compute Resources, eventi in Loki, Alloy su tutti i nodi;
+  restrizione `GRAFANA_ALLOWED_CIDRS`
 
 Test da fare:
 - **Test 22** — lab HA: completare l'installazione, poi verificare in `diagnose` nessun alert
