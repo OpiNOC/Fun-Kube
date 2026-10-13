@@ -472,8 +472,11 @@ Test da fare:
   dashboard "Log dei pod", eventi in Loki, `GRAFANA_ALLOWED_CIDRS`
 - **Test 23** — lab: valori da cluster grande (30/20/5/2) → `up` deve fermarsi sul controllo
   di capienza
-- **Test 24** — `fun-kube upgrade` su cluster con monitoring: le metriche del control plane
-  restano su 0.0.0.0 dopo `kubeadm upgrade`
+- **Test 24 ✓ (2026-10-13)** — `fun-kube upgrade` 1.35.4 → 1.35.9 su HA 3+3 con monitoring e
+  Longhorn: attesa repliche Longhorn dopo i drain funzionante; dopo `kubeadm upgrade` i
+  manifest rigenerati mantengono `--bind-address=0.0.0.0` e
+  `--listen-metrics-urls=http://0.0.0.0:2381` su tutti i CP (persistenza via kubeadm-config) e
+  Prometheus vede 15/15 target del control plane UP
 - **Test 25** — cluster OPI: adozione dell'installazione manuale (prima `--dry-run`), con
   `GRAFANA_EXPOSE=clusterip`, `GRAFANA_DOMAIN=watch-k8s.opiquad.it` e i volumi attuali
   (`PROM_STORAGE=30Gi PROM_RETENTION_SIZE=25GB LOKI_STORAGE=20Gi GRAFANA_STORAGE=5Gi
