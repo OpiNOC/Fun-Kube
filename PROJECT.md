@@ -413,8 +413,13 @@ Dalla guida observability di Enrico (kube-prometheus-stack 91.8.2 / Loki 18.13.7
 installati a mano sul cluster OPI, creato con Fun-Kube). Scelte:
 - variabili con i nomi della guida (`GRAFANA_*`, `PROM_*`, `LOKI_*`, `ALERTMANAGER_*`) +
   `MONITORING_ENABLED` e `MONITORING_STORAGE_CLASS`; default = valori in uso su OPI
-- `GRAFANA_EXPOSE=auto`: ingress (Traefik, modalità in più rispetto alla guida), clusterip
-  (NPM nel cluster), loadbalancer (MetalLB), nodeport
+- esposizione (rivista con Marco): default prudente `GRAFANA_EXPOSE=auto` = loadbalancer
+  (MetalLB, `GRAFANA_LB_IP=auto` o IP del pool, `GRAFANA_ALLOWED_CIDRS` →
+  loadBalancerSourceRanges) altrimenti nodeport (30300); `clusterip` esplicito per NPM nel
+  cluster (a fine `up` il nome `.svc.cluster.local`) o con `GRAFANA_TRAEFIK_INGRESS=true` per
+  il virtual host Traefik — flag dichiarativo nel `.env` invece di una domanda interattiva
+  (funziona con `up -y` e resta gestito alle esecuzioni successive). `GRAFANA_DOMAIN` solo se
+  un proxy pubblica Grafana (root_url). A fine `up` i valori reali (IP MetalLB letto dal Service)
 - password Grafana: `.env` > Secret esistente > generata
 - adozione dell'installazione manuale: stessi nomi; StorageClass creata solo se assente; CRD
   Prometheus Operator applicati server-side prima dell'upgrade (`helm show crds`); errore se le
@@ -441,7 +446,8 @@ Test da fare:
 - **Test 23** — lab: dimensioni di default → `up` deve fermarsi sul controllo di capienza
 - **Test 24** — `fun-kube upgrade` su cluster con monitoring: le metriche del control plane
   restano su 0.0.0.0 dopo `kubeadm upgrade`
-- **Test 25** — cluster OPI: adozione dell'installazione manuale (prima `--dry-run`)
+- **Test 25** — cluster OPI: adozione dell'installazione manuale (prima `--dry-run`), con
+  `GRAFANA_EXPOSE=clusterip` e `GRAFANA_DOMAIN=watch-k8s.opiquad.it` (come oggi)
 
 ## Prossimi passi / idee (2026-10-08)
 

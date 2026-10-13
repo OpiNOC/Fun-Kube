@@ -536,6 +536,8 @@ def _monitoring_vars(cluster: ClusterConfig) -> dict:
         "monitoring_grafana_expose": m.grafana_expose,
         "monitoring_grafana_nodeport": m.grafana_nodeport,
         "monitoring_grafana_lb_ip": m.grafana_lb_ip,
+        "monitoring_grafana_allowed_cidrs": m.grafana_allowed_cidrs,
+        "monitoring_grafana_traefik_ingress": m.grafana_traefik_ingress,
         "monitoring_storage_class": m.storage_class,
         "monitoring_create_longhorn_sc": m.create_longhorn_sc,
         "monitoring_sc_replicas": cluster.monitoring_sc_replicas,
@@ -798,33 +800,77 @@ def _ingress_maintenance_lines(cluster: "ClusterConfig") -> list:
     return lines
 
 
-def grafana_access(cluster: "ClusterConfig") -> tuple:
-    """(url Grafana, target del proxy NPM o None) secondo GRAFANA_EXPOSE."""
+GRAFANA_SVC_FQDN = "kube-prometheus-stack-grafana.monitoring.svc.cluster.local"
+PORT_FORWARD_HINT = [
+    "  kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80",
+    "  poi http://localhost:3000 sulla bootstrap; da un PC: ssh -L 3000:localhost:3000 root@<bootstrap>",
+]
+
+
+def _grafana_live_lb_ip(cluster: "ClusterConfig") -> str:
+    """IP assegnato da MetalLB al Service di Grafana ('' se non leggibile)."""
+    kubeconfig = Path(f"/root/.kube/{cluster.cluster_name}")
+    if not kubeconfig.exists():
+        return ""
+    try:
+        r = subprocess.run(
+            ["kubectl", "--request-timeout=10s", "-n", "monitoring", "get", "svc",
+             "kube-prometheus-stack-grafana", "-o", "jsonpath={.status.loadBalancer.ingress[0].ip}"],
+            capture_output=True, text=True, timeout=20,
+            env={**__import__("os").environ, "KUBECONFIG": str(kubeconfig)},
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def grafana_access(cluster: "ClusterConfig", live: bool = False) -> tuple:
+    """(url diretto o None, target per il proxy NPM o None) secondo GRAFANA_EXPOSE.
+    live=True legge dal cluster l'IP assegnato da MetalLB (GRAFANA_LB_IP=auto)."""
     m = cluster.monitoring
-    if m.grafana_expose == "ingress":
+    if m.grafana_expose == "loadbalancer":
+        ip = m.grafana_lb_ip or (_grafana_live_lb_ip(cluster) if live else "") or "<IP assegnato da MetalLB>"
+        return f"http://{ip}", None
+    if m.grafana_expose == "nodeport":
+        return f"http://{cluster.api_endpoint}:{m.grafana_nodeport}", None
+    # clusterip
+    if m.grafana_traefik_ingress:
         scheme = "https" if cluster.ingress.traefik_acme_email else "http"
         return f"{scheme}://{m.grafana_domain}", None
-    if m.grafana_expose == "nodeport":
-        target = f"{cluster.api_endpoint}:{m.grafana_nodeport}"
-    elif m.grafana_expose == "loadbalancer":
-        target = f"{m.grafana_lb_ip or '<IP MetalLB: kubectl -n monitoring get svc kube-prometheus-stack-grafana>'}:80"
-    else:
-        target = "kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80"
-    url = f"https://{m.grafana_domain}" if m.grafana_domain else f"http://{target}"
-    return url, target
+    return None, f"{GRAFANA_SVC_FQDN}:80"
+
+
+def grafana_summary_lines(cluster: "ClusterConfig", live: bool = False) -> list:
+    """Righe di accesso a Grafana per il riepilogo finale di up (valori reali se live)."""
+    m = cluster.monitoring
+    url, target = grafana_access(cluster, live)
+    lines = []
+    if url:
+        lines.append(f"Grafana:        {url}   (utente admin)")
+    if m.grafana_domain and not m.grafana_traefik_ingress:
+        lines.append(f"Dominio:        {m.grafana_domain} — da pubblicare con il proxy (root_url impostato)")
+    if target:
+        if m.grafana_domain:
+            lines.append(f"Target per NPM: {target}   (Proxy Host {m.grafana_domain}, Websockets attivo)")
+        else:
+            lines.append("Grafana:        solo port-forward (clusterip senza GRAFANA_DOMAIN):")
+            lines += [l.strip() and "  " + l.strip() for l in PORT_FORWARD_HINT]
+    if m.grafana_expose == "loadbalancer" and m.grafana_allowed_cidrs:
+        lines.append(f"Accesso da:     {', '.join(m.grafana_allowed_cidrs)}")
+    return lines
 
 
 def _monitoring_lines(cluster: "ClusterConfig", short: bool) -> list:
     m = cluster.monitoring
-    url, target = grafana_access(cluster)
+    _, target = grafana_access(cluster, live=True)
     pw_cmd = ("kubectl -n monitoring get secret kube-prometheus-stack-grafana "
               "-o jsonpath='{.data.admin-password}' | base64 -d; echo")
     if short:
         return [
             "# Monitoring (Prometheus, Grafana, Loki)",
-            f"Grafana:         {url}   (utente admin)",
-            f"Esposizione:     {m.grafana_expose}" + (f" → proxy NPM verso {target}" if target else ""),
-            f"Password admin:  {pw_cmd}",
+            f"Esposizione:    {m.grafana_expose}",
+            *grafana_summary_lines(cluster, live=True),
+            f"Password admin: {pw_cmd}",
             "kubectl -n monitoring get pods",
         ]
     lines = [
@@ -832,8 +878,8 @@ def _monitoring_lines(cluster: "ClusterConfig", short: bool) -> list:
         "-" * 40,
         "",
         "Namespace:      monitoring",
-        f"Grafana:        {url}   (utente admin)",
         f"Esposizione:    {m.grafana_expose}",
+        *grafana_summary_lines(cluster, live=True),
         f"StorageClass:   {m.storage_class}",
         f"Retention:      Prometheus {m.prom_retention} / {m.prom_retention_size}, Loki {m.loki_retention}",
         f"Volumi:         Prometheus {m.prom_storage}, Loki {m.loki_storage}, "
@@ -846,7 +892,7 @@ def _monitoring_lines(cluster: "ClusterConfig", short: bool) -> list:
         "Administration → Users, non dal .env dopo la prima installazione):",
         f"  {pw_cmd}",
     ]
-    if target:
+    if target and m.grafana_domain:
         lines += [
             "",
             "Proxy Host su Nginx Proxy Manager (Hosts → Proxy Hosts → Add Proxy Host):",
@@ -856,11 +902,14 @@ def _monitoring_lines(cluster: "ClusterConfig", short: bool) -> list:
             "  Block Common Exploits e Websockets Support: attivi (Websockets obbligatorio)",
             "  SSL: Request a new SSL Certificate, Force SSL, HTTP/2",
         ]
-        if m.grafana_expose == "nodeport":
-            lines += [
-                "  La NodePort risponde su tutti i nodi: limitare sul firewall l'accesso alla",
-                f"  porta {m.grafana_nodeport} al solo IP della macchina NPM.",
-            ]
+    if target and not m.grafana_domain:
+        lines += ["", "Accesso solo via port-forward (clusterip senza GRAFANA_DOMAIN):", *PORT_FORWARD_HINT]
+    if m.grafana_expose == "nodeport":
+        lines += [
+            "",
+            f"La NodePort {m.grafana_nodeport} risponde su tutte le interfacce di tutti i nodi (HTTP):",
+            "limitare l'accesso sul firewall se la rete dei nodi non è fidata.",
+        ]
     lines += [
         "",
         "Prometheus e Alertmanager non hanno autenticazione: NON pubblicarli, usare:",

@@ -353,8 +353,8 @@ Per disabilitare completamente: `DN_ESSENCE_ENABLED=false`.
 
 ```ini
 MONITORING_ENABLED=true
-GRAFANA_DOMAIN=grafana.cluster.dominio.it
-GRAFANA_EXPOSE=auto
+GRAFANA_EXPOSE=auto        # loadbalancer (MetalLB) o nodeport
+GRAFANA_LB_IP=auto
 ```
 
 Installa nel namespace `monitoring` (versioni in `fun_kube/versions.py`):
@@ -368,11 +368,20 @@ Installa nel namespace `monitoring` (versioni in `fun_kube/versions.py`):
 | ServiceMonitor Longhorn | metriche di volumi e dischi (se Longhorn è abilitato) |
 | Dashboard "Log dei pod" | log per namespace/pod/container con ricerca, errori ed eventi |
 
-**Esposizione di Grafana** (`GRAFANA_EXPOSE=auto`): con Traefik crea un Ingress su
-`GRAFANA_DOMAIN` (Let's Encrypt se `TRAEFIK_ACME_EMAIL` è impostato); con Nginx Proxy Manager
-resta ClusterIP e il file di manutenzione indica il Proxy Host da creare; senza ingress usa
-LoadBalancer (MetalLB) o NodePort. Prometheus e Alertmanager non vengono mai pubblicati
-(nessuna autenticazione): si usano con `kubectl port-forward`.
+**Esposizione di Grafana** — per default resta sulla rete dei nodi, non pubblicata:
+
+| `GRAFANA_EXPOSE` | Accesso | A fine `up` viene mostrato |
+|---|---|---|
+| `auto` *(default)* | `loadbalancer` se c'è MetalLB, altrimenti `nodeport` | — |
+| `loadbalancer` | IP MetalLB (`GRAFANA_LB_IP=auto` o un IP del pool), limitabile con `GRAFANA_ALLOWED_CIDRS` | `http://<IP assegnato>` |
+| `nodeport` | `http://<IP nodo>:30300` (`GRAFANA_NODEPORT`) | URL con VIP o IP del CP |
+| `clusterip` | solo dentro il cluster, da pubblicare con un proxy su `GRAFANA_DOMAIN` | nome interno per NPM: `kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80` |
+| `clusterip` + `GRAFANA_TRAEFIK_INGRESS=true` | virtual host Traefik su `GRAFANA_DOMAIN` (Let's Encrypt se `TRAEFIK_ACME_EMAIL`) | `https://<dominio>` |
+
+`clusterip` senza dominio: solo `kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80`.
+`GRAFANA_DOMAIN` va impostato solo se un proxy pubblica Grafana con quel nome (è il `root_url`).
+Prometheus e Alertmanager non vengono mai pubblicati (nessuna autenticazione): si usano con
+`kubectl port-forward`.
 
 **Storage**: con Longhorn crea la StorageClass `longhorn-monitoring` (max 2 repliche, `Retain`) e
 verifica prima che ci sia spazio prenotabile: i default (30+20+5+2 GiB) × 2 repliche richiedono

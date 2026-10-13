@@ -1,5 +1,5 @@
 # kube-prometheus-stack — generato da Fun-Kube (guida observability, passo 4)
-{% set _scheme = 'http' if (monitoring_grafana_expose == 'ingress' and not traefik_acme_email) else 'https' %}
+{% set _scheme = 'http' if (monitoring_grafana_traefik_ingress and not traefik_acme_email) else 'https' %}
 grafana:
   adminPassword: "{{ _grafana_admin_password }}"
   persistence:
@@ -19,12 +19,18 @@ grafana:
     annotations:
       metallb.io/loadBalancerIPs: "{{ monitoring_grafana_lb_ip }}"
 {% endif %}
+{% if monitoring_grafana_allowed_cidrs %}
+    loadBalancerSourceRanges:
+{% for cidr in monitoring_grafana_allowed_cidrs %}
+      - {{ cidr }}
+{% endfor %}
+{% endif %}
 {% else %}
   service:
     type: ClusterIP
     port: 80
 {% endif %}
-{% if monitoring_grafana_expose == 'ingress' %}
+{% if monitoring_grafana_traefik_ingress %}
   ingress:
     enabled: true
     ingressClassName: traefik

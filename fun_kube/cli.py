@@ -125,6 +125,12 @@ def up(
     console.print(f"  Kubeconfig emergenza : /root/.kube/{cluster.cluster_name}-admin  [yellow](~1 anno)[/]")
     console.print(f"  Info manutenzione    : /root/{cluster.cluster_name}-manutenzione.txt")
     console.print(f"  Output progetto      : {cluster.output_dir}/cluster-info.txt")
+    if cluster.monitoring.enabled:
+        console.print("\n  [bold]Monitoring[/]")
+        for line in runner.grafana_summary_lines(cluster, live=True):
+            console.print(f"  {line}")
+        console.print("  Password admin Grafana: kubectl -n monitoring get secret kube-prometheus-stack-grafana "
+                      "-o jsonpath='{.data.admin-password}' | base64 -d; echo")
     console.print(f"\n  [yellow]Applica alias e kubeconfig:[/]  source ~/.bashrc\n")
 
 
@@ -944,11 +950,12 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
                 console.print(f"    DN-essence version: {cluster.dn_essence.version}")
         if cluster.monitoring.enabled:
             m = cluster.monitoring
-            url, target = runner.grafana_access(cluster)
             auto = " (auto)" if m.grafana_expose_requested == "auto" else ""
-            console.print(f"    Grafana           : {url}")
-            console.print(f"    Esposizione       : {m.grafana_expose}{auto}"
-                          + (f" → proxy verso {target}" if target else ""))
+            extra = " + virtual host Traefik" if m.grafana_traefik_ingress else ""
+            console.print(f"    Grafana esposto   : {m.grafana_expose}{auto}{extra}")
+            for line in runner.grafana_summary_lines(cluster):
+                k, _, v = line.partition(":")
+                console.print(f"    {k.strip():<18}: {v.strip()}" if v else f"    {line}")
             sc_note = f" (creata, {cluster.monitoring_sc_replicas} repliche, Retain)" if m.create_longhorn_sc else ""
             console.print(f"    Storage monitoring: {m.storage_class}{sc_note} — "
                           f"{m.prom_storage}+{m.loki_storage}+{m.grafana_storage}+{m.alertmanager_storage}")

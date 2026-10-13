@@ -79,10 +79,12 @@ class MonitoringConfig:
     enabled: bool
     grafana_domain: str            # root_url + host dell'Ingress (vuoto = nessun root_url)
     grafana_admin_password: str    # vuoto = generata alla prima installazione / letta dal Secret
-    grafana_expose: str            # dopo la risoluzione: ingress | clusterip | nodeport | loadbalancer
+    grafana_expose: str            # dopo la risoluzione: loadbalancer | nodeport | clusterip
     grafana_expose_requested: str  # valore del .env (auto o esplicito)
     grafana_nodeport: int
-    grafana_lb_ip: str
+    grafana_lb_ip: str             # "" = assegnato da MetalLB (GRAFANA_LB_IP=auto)
+    grafana_allowed_cidrs: List[str]  # loadBalancerSourceRanges (solo loadbalancer)
+    grafana_traefik_ingress: bool  # virtual host Traefik su GRAFANA_DOMAIN (solo clusterip)
     storage_class: str             # dopo la risoluzione: nome della StorageClass
     create_longhorn_sc: bool       # True = Fun-Kube crea longhorn-monitoring (se assente)
     prom_retention: str
@@ -370,11 +372,14 @@ def _str(env: dict, key: str, default: str = "") -> str:
 
 def _parse_monitoring(env: dict) -> MonitoringConfig:
     expose = _str(env, "GRAFANA_EXPOSE", "auto").lower()
-    if expose not in ("auto", "ingress", "clusterip", "nodeport", "loadbalancer"):
+    if expose not in ("auto", "loadbalancer", "nodeport", "clusterip"):
         raise ConfigError(
-            f"GRAFANA_EXPOSE deve essere auto | ingress | clusterip | nodeport | loadbalancer, "
-            f"trovato: '{expose}'"
+            f"GRAFANA_EXPOSE deve essere auto | loadbalancer | nodeport | clusterip, trovato: '{expose}'"
+            + ("\n  Per il virtual host Traefik: GRAFANA_EXPOSE=clusterip + GRAFANA_TRAEFIK_INGRESS=true."
+               if expose == "ingress" else "")
         )
+    lb_ip = _str(env, "GRAFANA_LB_IP", "auto")
+    cidrs = [c.strip() for c in _str(env, "GRAFANA_ALLOWED_CIDRS").split(",") if c.strip()]
     return MonitoringConfig(
         enabled=_bool(env, "MONITORING_ENABLED"),
         grafana_domain=_str(env, "GRAFANA_DOMAIN"),
@@ -382,7 +387,9 @@ def _parse_monitoring(env: dict) -> MonitoringConfig:
         grafana_expose=expose,
         grafana_expose_requested=expose,
         grafana_nodeport=int(_str(env, "GRAFANA_NODEPORT", "30300")),
-        grafana_lb_ip=_str(env, "GRAFANA_LB_IP"),
+        grafana_lb_ip="" if lb_ip.lower() == "auto" else lb_ip,
+        grafana_allowed_cidrs=cidrs,
+        grafana_traefik_ingress=_bool(env, "GRAFANA_TRAEFIK_INGRESS"),
         storage_class=_str(env, "MONITORING_STORAGE_CLASS", "auto"),
         create_longhorn_sc=False,
         prom_retention=_str(env, "PROM_RETENTION", "15d"),
@@ -403,14 +410,9 @@ def _resolve_monitoring(cfg: "ClusterConfig") -> None:
     if not m.enabled:
         return
     if m.grafana_expose == "auto":
-        if cfg.ingress.enabled and cfg.ingress.type == "traefik":
-            m.grafana_expose = "ingress"         # Ingress Traefik su GRAFANA_DOMAIN
-        elif cfg.ingress.enabled and cfg.ingress.type == "nginx-proxy-manager":
-            m.grafana_expose = "clusterip"       # NPM nel cluster raggiunge il Service
-        elif cfg.metallb.enabled:
-            m.grafana_expose = "loadbalancer"    # NPM/proxy esterno → IP MetalLB
-        else:
-            m.grafana_expose = "nodeport"        # NPM/proxy esterno → IP nodo:NodePort
+        # Default prudente: raggiungibile solo sulla rete dei nodi. La pubblicazione
+        # tramite NPM/Traefik (clusterip) va scelta esplicitamente.
+        m.grafana_expose = "loadbalancer" if cfg.metallb.enabled else "nodeport"
     if m.storage_class == "auto":
         if cfg.longhorn.enabled:
             m.storage_class = "longhorn-monitoring"
@@ -535,13 +537,47 @@ def _validate(cfg: ClusterConfig) -> List[str]:
     # Monitoring
     m = cfg.monitoring
     if m.enabled:
-        if m.grafana_expose == "ingress":
+        if m.grafana_expose == "loadbalancer":
+            if not cfg.metallb.enabled:
+                errors.append("GRAFANA_EXPOSE=loadbalancer richiede METALLB_ENABLED=true "
+                              "(senza MetalLB usare nodeport).")
+            if m.grafana_lb_ip:
+                try:
+                    ip = ipaddress.ip_address(m.grafana_lb_ip)
+                    start, end = _parse_ip_pool(cfg.metallb.ip_pool)
+                    if not start <= ip <= end:
+                        errors.append(f"GRAFANA_LB_IP {ip} fuori da METALLB_IP_POOL ({cfg.metallb.ip_pool}).")
+                except ValueError:
+                    errors.append(f"GRAFANA_LB_IP non valido: '{m.grafana_lb_ip}' (auto oppure un IP del pool).")
+            for c in m.grafana_allowed_cidrs:
+                try:
+                    ipaddress.ip_network(c, strict=False)
+                except ValueError:
+                    errors.append(
+                        f"GRAFANA_ALLOWED_CIDRS: '{c}' non è un CIDR valido "
+                        "(separati da virgola, es. 10.0.0.0/24,192.168.10.0/24)."
+                    )
+        elif m.grafana_allowed_cidrs:
+            warnings.append("GRAFANA_ALLOWED_CIDRS vale solo con GRAFANA_EXPOSE=loadbalancer: ignorata.")
+        if m.grafana_traefik_ingress:
+            if m.grafana_expose != "clusterip":
+                errors.append("GRAFANA_TRAEFIK_INGRESS=true richiede GRAFANA_EXPOSE=clusterip.")
             if not (cfg.ingress.enabled and cfg.ingress.type == "traefik"):
-                errors.append("GRAFANA_EXPOSE=ingress richiede INGRESS_ENABLED=true e INGRESS_TYPE=traefik.")
+                errors.append("GRAFANA_TRAEFIK_INGRESS=true richiede INGRESS_ENABLED=true e INGRESS_TYPE=traefik.")
             if not m.grafana_domain:
-                errors.append("GRAFANA_EXPOSE=ingress richiede GRAFANA_DOMAIN (host dell'Ingress).")
-        if m.grafana_expose == "loadbalancer" and not cfg.metallb.enabled:
-            errors.append("GRAFANA_EXPOSE=loadbalancer richiede METALLB_ENABLED=true.")
+                errors.append("GRAFANA_TRAEFIK_INGRESS=true richiede GRAFANA_DOMAIN (nome del virtual host).")
+        if m.grafana_expose == "clusterip" and not m.grafana_domain:
+            warnings.append(
+                "Grafana in clusterip senza GRAFANA_DOMAIN: raggiungibile solo con port-forward:\n"
+                "    kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80\n"
+                "    poi http://localhost:3000 sulla bootstrap; da un PC: ssh -L 3000:localhost:3000 root@<bootstrap>"
+            )
+        if (m.grafana_expose == "clusterip" and m.grafana_domain and not m.grafana_traefik_ingress
+                and cfg.ingress.enabled and cfg.ingress.type == "traefik"):
+            warnings.append(
+                f"Suggerimento: con Traefik attivo, GRAFANA_TRAEFIK_INGRESS=true crea il virtual host "
+                f"{m.grafana_domain} (altrimenti configurare il proxy a mano)."
+            )
         if m.grafana_expose == "nodeport":
             if not 30000 <= m.grafana_nodeport <= 32767:
                 errors.append(f"GRAFANA_NODEPORT {m.grafana_nodeport} fuori dal range 30000-32767.")
