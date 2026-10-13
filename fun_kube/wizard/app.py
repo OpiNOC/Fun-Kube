@@ -15,13 +15,13 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import (Button, ContentSwitcher, Footer, Input, Label, OptionList,
-                             RadioButton, RadioSet, Static, Switch)
+                             RadioButton, RadioSet, Static, Switch, TextArea)
 from textual.widgets.option_list import Option
 
 from .. import __version__
 from . import model
 from .model import STEPS, WizardState
-from .texts import CHOICES, FIELDS, LOCKED_HINT, STEP_INTRO, TOPOLOGY_HELP
+from .texts import CHOICES, FIELDS, LOCKED_HINT, STEP_INTRO, TOPOLOGY_HELP, UPGRADE_HELP
 
 STEP_FIELDS = {
     "Cluster": ["CLUSTER_NAME", "K8S_VERSION", "CLUSTER_TIMEZONE"],
@@ -61,7 +61,12 @@ Screen { layout: vertical; }
 .errors { color: $error; }
 .warnings { color: $warning; }
 .ok { color: $success; }
-#review-env { border: round $secondary; height: auto; max-height: 24; overflow-y: auto; }
+#step-5 { height: 1fr; }
+#review-status { height: auto; max-height: 12; overflow-y: auto; }
+#review-buttons { margin: 1 0 0 0; }
+#review-env { height: 1fr; min-height: 8; border: round $secondary; }
+#review-env:focus { border: round $accent; }
+#upgrade-box { height: auto; margin: 1 0 0 0; }
 Switch { width: auto; }
 RadioSet { width: 1fr; }
 """
@@ -158,7 +163,7 @@ class WizardScreen(Screen):
             yield OptionList(*[Option(s, id=f"step:{i}") for i, s in enumerate(STEPS)], id="steps")
             with ContentSwitcher(initial="step-0", id="main"):
                 for i, name in enumerate(STEPS):
-                    with VerticalScroll(id=f"step-{i}"):
+                    with (Vertical if name == "Review" else VerticalScroll)(id=f"step-{i}"):
                         yield Static(STEP_INTRO[name], classes="intro")
                         yield from self._step_widgets(name)
         yield Static("", id="help")
@@ -169,14 +174,23 @@ class WizardScreen(Screen):
             yield from self._nodes_widgets()
         elif name == "Review":
             yield Static("", id="review-status")
-            yield Static("", id="review-env")
-            with Horizontal(classes="row"):
+            with Horizontal(classes="row", id="review-buttons"):
                 yield Button("Save", id="save", variant="primary")
                 yield Button("Save + dry-run", id="save-dry")
                 yield Button("Save + provision", id="save-up", variant="warning")
+                yield Button("Save + upgrade dry-run", id="save-upg-dry")
+                yield Button("Save + upgrade", id="save-upg", variant="warning")
+            yield Static("The file that will be written — Tab to it, then ↑↓ PgUp PgDn to scroll.",
+                         classes="hint")
+            yield TextArea("", id="review-env", read_only=True, soft_wrap=False, show_line_numbers=False)
         else:
             for key in STEP_FIELDS[name]:
                 yield self._field(key)
+            if name == "Cluster" and self.state.existing_cluster:
+                with Vertical(id="upgrade-box", classes="fld"):
+                    yield Label("Kubernetes upgrade")
+                    yield Static("Checking the versions available for this cluster…", id="upgrade-status",
+                                 classes="hint")
             if name == "Access & network":
                 yield Button("Test SSH to all nodes", id="test-ssh")
                 yield Static("", id="ssh-result")
@@ -196,8 +210,12 @@ class WizardScreen(Screen):
                            password=key.endswith("PASSWORD") or key.endswith("WEBHOOK"))
         widget.disabled = locked
         classes = "fld" + (" adv" if adv else "") + (" locked" if locked else "")
+        if locked and key == "K8S_VERSION" and self.state.live:
+            hint = f"The cluster runs {self.state.live.version}. To update it choose a Kubernetes upgrade below."
+        elif locked:
+            hint = LOCKED_HINT
         return Vertical(Label(label + ("  (advanced)" if adv else "")), widget,
-                        Static(LOCKED_HINT if locked else hint, classes="hint"),
+                        Static(hint, classes="hint"),
                         id=f"fld-{key}", classes=classes)
 
     def _nodes_widgets(self) -> ComposeResult:
@@ -222,6 +240,30 @@ class WizardScreen(Screen):
         self._refresh()
         self.query_one("#steps", OptionList).highlighted = 0
         self._focus_step()
+        if self.state.existing_cluster:
+            self._upgrade_worker()
+
+    # --- Kubernetes upgrade (existing clusters) ----------------------------
+    @work(thread=True, exclusive=True, group="upgrade")
+    def _upgrade_worker(self) -> None:
+        targets = model.upgrade_targets(self.state)
+        self.app.call_from_thread(self._show_upgrade_targets, targets)
+
+    def _show_upgrade_targets(self, targets) -> None:
+        live = self.state.live
+        status = self.query_one("#upgrade-status", Static)
+        if not targets:
+            status.update(f"The cluster runs {live.version}: no newer patch or minor version found "
+                          "(or pkgs.k8s.io is unreachable).")
+            return
+        status.update(f"The cluster runs {live.version}. One step at a time: a newer patch, or the next "
+                      "minor version. Nodes are upgraded one by one (drain → upgrade → uncordon).")
+        buttons = [RadioButton("No upgrade", value=True, id="up--none")]
+        for version, label, avail in targets:
+            b = RadioButton(label, id="up--" + version.replace(".", "_"))
+            b.disabled = not avail
+            buttons.append(b)
+        self.query_one("#upgrade-box").mount(RadioSet(*buttons, id="upgrade"), after=status)
 
     # --- nodes ------------------------------------------------------------
     def _build_node_rows(self) -> None:
@@ -325,7 +367,10 @@ class WizardScreen(Screen):
     @on(RadioSet.Changed)
     def _radio(self, event: RadioSet.Changed) -> None:
         rid = event.pressed.id or ""
-        if event.radio_set.id == "topology":
+        if event.radio_set.id == "upgrade":
+            v = rid.split("--", 1)[1]
+            self.state.upgrade_to = "" if v == "none" else v.replace("_", ".")
+        elif event.radio_set.id == "topology":
             self.state.set_topology(rid.split("--", 1)[1])
             self.query_one("#cp-count", Input).value = str(len(self.state.cps))
             self.query_one("#worker-count", Input).value = str(len(self.state.workers))
@@ -343,6 +388,9 @@ class WizardScreen(Screen):
                 key = nid[4:]
                 label, hint, help_, _ = FIELDS[key]
                 self.query_one("#help", Static).update(f"[b]{label}[/b] — {help_ or hint}")
+                return
+            if nid == "upgrade-box":
+                self.query_one("#help", Static).update(UPGRADE_HELP)
                 return
             if nid in ("topology", "node-rows", "counts"):
                 self.query_one("#help", Static).update(TOPOLOGY_HELP[self.state.topology])
@@ -395,21 +443,29 @@ class WizardScreen(Screen):
             problems = cfg_errors
         status = self.query_one("#review-status", Static)
         if problems:
-            status.update("[b]Fix before saving:[/b]\n" + "\n".join(f"[red]✗[/] {p}" for p in problems))
+            text = "[b]Fix before saving:[/b]\n" + "\n".join(f"[red]✗[/] {p}" for p in problems)
         else:
             text = "[green]✓ Configuration valid.[/]"
             if warnings:
                 text += "\n" + "\n".join(f"[yellow]![/] {w.splitlines()[0]}" for w in warnings)
-            status.update(text)
-        self.query_one("#review-env", Static).update(st.render())
-        for bid in ("save", "save-dry", "save-up"):
-            self.query_one(f"#{bid}", Button).disabled = bool(problems)
+        if st.upgrade_to and st.live:
+            text += (f"\n[b]Kubernetes upgrade {st.live.version} → {st.upgrade_to}[/b]: runs "
+                     "`fun-kube upgrade` (it updates K8S_VERSION in the file when done). Other changes "
+                     f"(add-ons, new nodes) are applied afterwards with ./fun-kube up {self.path.name}.")
+        status.update(text)
+        self.query_one("#review-env", TextArea).load_text(st.render())
+        upgrade = bool(st.upgrade_to)
+        for bid in ("save", "save-dry", "save-up", "save-upg-dry", "save-upg"):
+            btn = self.query_one(f"#{bid}", Button)
+            btn.disabled = bool(problems)
+            btn.display = bid == "save" or (bid.startswith("save-upg") == upgrade)
 
-    @on(Button.Pressed, "#save, #save-dry, #save-up")
+    @on(Button.Pressed, "#save, #save-dry, #save-up, #save-upg-dry, #save-upg")
     def _save(self, event: Button.Pressed) -> None:
         model.save(self.state, self.path)
-        action = {"save": "save", "save-dry": "dry-run", "save-up": "up"}[event.button.id]
-        self.app.exit((self.path, action))
+        action = {"save": "save", "save-dry": "dry-run", "save-up": "up",
+                  "save-upg-dry": "upgrade-dry-run", "save-upg": "upgrade"}[event.button.id]
+        self.app.exit((self.path, action, self.state.upgrade_to))
 
     # --- actions ----------------------------------------------------------
     def action_next(self) -> None:
@@ -444,6 +500,6 @@ class WizardApp(App):
         self.push_screen(FileScreen(self.project_dir))
 
 
-def run(project_dir: Path) -> Optional[Tuple[Path, str]]:
-    """Run the wizard. Returns (env file, action) or None if cancelled."""
+def run(project_dir: Path) -> Optional[Tuple[Path, str, str]]:
+    """Run the wizard. Returns (env file, action, upgrade target) or None if cancelled."""
     return WizardApp(project_dir).run()

@@ -26,7 +26,8 @@ STEP_INTRO = {
     "Review": (
         "Check the result. The configuration is validated with the same rules used by "
         "`fun-kube up`. Save only, run a dry-run (configuration + SSH checks, no changes), "
-        "or save and provision."
+        "or save and provision. With a Kubernetes upgrade selected (existing clusters), the last two "
+        "run `fun-kube upgrade` instead."
     ),
 }
 
@@ -45,7 +46,8 @@ FIELDS = {
                      "maintenance file. Cannot be changed after the cluster is created.", False),
     "K8S_VERSION": ("Kubernetes version", f"Tested: {versions.K8S_VERSION}",
                     f"Leave {versions.K8S_VERSION} (tested with all add-ons) unless you need a specific "
-                    "version. 'latest' = newest upstream stable. Later upgrades: fun-kube upgrade.", False),
+                    "version. 'latest' = newest upstream stable. Existing clusters: use the upgrade choice "
+                    "in this step.", False),
     "CLUSTER_TIMEZONE": ("Timezone", "e.g. Europe/Rome", "Applied to all nodes.", True),
     "LOCAL_NODE": ("Run on this machine", "Install the cluster on this same machine (no SSH)",
                    "Turn on if this machine IS the node. Useful for labs with limited resources.", False),
@@ -143,5 +145,11 @@ FIELDS = {
 CHOICES = {
     "INGRESS_TYPE": [("traefik", "Traefik"), ("nginx-proxy-manager", "Nginx Proxy Manager")],
 }
+
+UPGRADE_HELP = (
+    "Runs `fun-kube upgrade`: checks first (cluster health, add-on compatibility, Longhorn volumes), "
+    "etcd snapshot, then one node at a time. Workloads stop only if you confirm it explicitly "
+    "(single node, 1-replica volumes). Choose the dry-run first to see the plan."
+)
 
 LOCKED_HINT = "Locked: the cluster already exists — changing this requires a reinstall."

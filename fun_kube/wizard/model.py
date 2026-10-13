@@ -11,12 +11,15 @@ again by config.load() before saving.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import secrets
 import string
 import subprocess
 import tempfile
-from dataclasses import dataclass
+import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -92,7 +95,8 @@ TOPOLOGIES = {
 }
 
 # Keys written by the wizard, grouped in sections with a short English comment.
-# Keys of disabled features are written only as "<FEATURE>_ENABLED=false".
+# New files: keys of disabled features are written only as "<FEATURE>_ENABLED=false";
+# keys already in a loaded file are always kept.
 SECTIONS: List[Tuple[str, str, List[str]]] = [
     ("Cluster", "", ["CLUSTER_NAME", "K8S_VERSION", "CLUSTER_TIMEZONE"]),
     ("Access", "SSH from this machine to the nodes (not used with LOCAL_NODE=true).",
@@ -144,10 +148,13 @@ class WizardState:
     def __init__(self, values: Optional[Dict[str, str]] = None, extra: Optional[Dict[str, str]] = None):
         self.values: Dict[str, str] = {**DEFAULTS, **(values or {})}
         self.extra: Dict[str, str] = extra or {}      # unknown keys, preserved on save
+        self.from_file: set = set(values or {})       # keys of the loaded file: always written back
         self.cps: List[Node] = []
         self.workers: List[Node] = []
         self.topology = "single"
         self.existing_cluster = False                 # cluster reachable → some fields locked
+        self.live: Optional[ClusterInfo] = None       # what the existing cluster runs
+        self.upgrade_to = ""                          # Kubernetes upgrade target ("" = none)
 
     # --- nodes / topology -------------------------------------------------
     def load_nodes(self, env: Dict[str, str]) -> None:
@@ -288,6 +295,31 @@ class WizardState:
                 and not self.v("NPM_DB_PASSWORD"):
             self.values["NPM_DB_PASSWORD"] = random_password()
 
+    def installed_addons(self) -> List[str]:
+        """Add-ons (names in versions.K8S_COMPAT) the configuration installs."""
+        out = ["calico", "cert-manager", "metrics-server"]
+        if self.on("METALLB_ENABLED"):
+            out.append("metallb")
+        if self.on("LONGHORN_ENABLED"):
+            out.append("longhorn")
+        if self.on("INGRESS_ENABLED") and self.v("INGRESS_TYPE") == "traefik":
+            out.append("traefik")
+        if self.on("MONITORING_ENABLED"):
+            out.append("monitoring")
+        return out
+
+    def upgrade_node_mismatch(self) -> str:
+        """`upgrade` needs the .env nodes to match the cluster nodes exactly."""
+        if not self.live:
+            return ""
+        env = {n.hostname.strip() for n in self.cps + self.workers}
+        added, removed = sorted(env - set(self.live.nodes)), sorted(set(self.live.nodes) - env)
+        if not (added or removed):
+            return ""
+        parts = ([f"new in the file: {', '.join(added)}"] if added else []) + \
+                ([f"missing from the file: {', '.join(removed)}"] if removed else [])
+        return "; ".join(parts)
+
     # --- .env output ------------------------------------------------------
     def to_env(self) -> Dict[str, str]:
         self.normalize()
@@ -309,6 +341,8 @@ class WizardState:
             return True
         if key == "LOCAL_NODE":
             return self.topology == "single"
+        if key in self.from_file:
+            return True       # settings of a disabled feature stay in the file
         return self.visible(key) and (self.v(key) != "" or key in ("KEEPALIVED_INTERFACE",
                                                                   "GRAFANA_DOMAIN", "GRAFANA_ADMIN_PASSWORD",
                                                                   "API_SERVER_EXTRA_SANS"))
@@ -381,24 +415,94 @@ def load_state(path: Optional[Path]) -> WizardState:
     if st.v("GRAFANA_LB_IP") == "":
         st.values["GRAFANA_LB_IP"] = "auto"
     st.load_nodes(raw)
-    st.existing_cluster = cluster_reachable(st.v("CLUSTER_NAME"))
+    st.live = cluster_info(st.v("CLUSTER_NAME"))
+    st.existing_cluster = st.live is not None
     return st
 
 
-def cluster_reachable(name: str) -> bool:
-    """True if a cluster with this name answers with the bootstrap kubeconfig."""
-    if not name:
-        return False
+# ---------------------------------------------------------------------------
+# Existing cluster: version, nodes, upgrade targets
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ClusterInfo:
+    version: str                                          # control plane (API server), e.g. v1.35.9
+    nodes: Dict[str, str] = field(default_factory=dict)   # node name → kubelet version
+
+    @property
+    def partial_upgrade(self) -> bool:
+        """Some kubelets are behind the control plane (interrupted upgrade)."""
+        return any(v != self.version for v in self.nodes.values())
+
+
+def _kubectl(name: str, *args: str) -> Optional[str]:
     kubeconfig = Path(f"/root/.kube/{name}")
     try:
         if not os.access(kubeconfig, os.R_OK):
-            return False
-        r = subprocess.run(["kubectl", "--request-timeout=4s", "get", "--raw", "/readyz"],
-                           capture_output=True, text=True, timeout=8,
-                           env={**os.environ, "KUBECONFIG": str(kubeconfig)})
-        return r.returncode == 0
+            return None
+        r = subprocess.run(["kubectl", "--request-timeout=4s", *args], capture_output=True, text=True,
+                           timeout=8, env={**os.environ, "KUBECONFIG": str(kubeconfig)})
+        return r.stdout if r.returncode == 0 else None
     except Exception:
-        return False
+        return None
+
+
+def cluster_info(name: str) -> Optional[ClusterInfo]:
+    """Version and nodes of the cluster with this name (bootstrap kubeconfig), None if unreachable."""
+    if not name:
+        return None
+    raw = _kubectl(name, "get", "--raw", "/version")
+    if raw is None:
+        return None
+    try:
+        info = ClusterInfo(json.loads(raw)["gitVersion"])
+        for n in json.loads(_kubectl(name, "get", "nodes", "-o", "json") or "{}").get("items", []):
+            info.nodes[n["metadata"]["name"]] = n["status"]["nodeInfo"]["kubeletVersion"]
+        return info
+    except (ValueError, KeyError):
+        return None
+
+
+def latest_patch(minor: int) -> Optional[str]:
+    """Newest kubeadm v1.<minor>.x in pkgs.k8s.io, None if the minor is not released / unreachable."""
+    url = f"https://pkgs.k8s.io/core:/stable:/v1.{minor}/deb/Packages"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            packages = r.read().decode()
+    except Exception:
+        return None
+    found = re.findall(r"^Package: kubeadm\n(?:.+\n)*?Version: (\d+)\.(\d+)\.(\d+)-", packages, re.M)
+    if not found:
+        return None
+    return "v%s.%s.%s" % max(tuple(map(int, v)) for v in found)
+
+
+def upgrade_targets(state: WizardState) -> List[Tuple[str, str, bool]]:
+    """(version, label, available) for `fun-kube upgrade`: same-minor patch and next minor.
+    Needs network access to pkgs.k8s.io; call it off the UI thread."""
+    live = state.live
+    if not live:
+        return []
+    try:
+        cur_minor = versions.k8s_minor(live.version)
+    except ValueError:
+        return []
+    out: List[Tuple[str, str, bool]] = []
+    if live.partial_upgrade:
+        out.append((live.version, f"{live.version} — resume the interrupted upgrade (some nodes are behind)", True))
+    cur = tuple(int(x) for x in live.version.lstrip("v").split(".")[:3])
+    for minor, kind in ((cur_minor, "patch"), (cur_minor + 1, "minor")):
+        target = latest_patch(minor)
+        if not target or tuple(int(x) for x in target.lstrip("v").split(".")) <= cur:
+            continue
+        bad = versions.incompatible_addons(target, state.installed_addons())
+        if bad:
+            names = ", ".join(bad).replace("supporta", "supports")
+            out.append((target, f"{target} — {kind} upgrade, not tested with: {names}", False))
+        else:
+            tested = " (tested by Fun-Kube)" if target == versions.K8S_VERSION else ""
+            out.append((target, f"{target} — {kind} upgrade{tested}", True))
+    return out
 
 
 # Fields `up` cannot change on an existing cluster (see preflight.check_existing_cluster)
@@ -499,6 +603,12 @@ def step_errors(state: WizardState) -> Dict[str, List[str]]:
             errs["Add-ons"].append("MetalLB pool: use a range (10.0.0.200-10.0.0.220) or a CIDR (10.0.0.192/28).")
     if on("INGRESS_ENABLED") and v("INGRESS_TYPE") == "nginx-proxy-manager" and not v("NPM_DB_PASSWORD"):
         errs["Add-ons"].append("Nginx Proxy Manager database password is required.")
+
+    if state.upgrade_to:
+        mismatch = state.upgrade_node_mismatch()
+        if mismatch:
+            errs["Cluster"].append(f"The upgrade needs the node list to match the cluster ({mismatch}). "
+                                   "Add nodes with provision first, then upgrade.")
 
     if on("MONITORING_ENABLED"):
         if not state.monitoring_storage_ok():

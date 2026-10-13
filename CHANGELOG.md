@@ -10,6 +10,10 @@
   cluster già installati, test SSH dei nodi, validazione con le regole di `up`; alla fine salva,
   esegue il dry-run o lancia il provisioning. Nuova dipendenza: Textual (installata
   automaticamente nel venv).
+- Wizard: **upgrade di Kubernetes** sui cluster esistenti (versioni disponibili lette dal cluster e
+  da pkgs.k8s.io, compatibilità con gli addon, ripresa di un upgrade interrotto) → lancia
+  `fun-kube upgrade`; anteprima del `.env` completa e scorrevole; le variabili già presenti nel
+  file vengono sempre conservate.
 
 ## 1.0.0 — 2026-10-13
 

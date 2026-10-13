@@ -28,10 +28,18 @@ def launch(project_dir: Path) -> None:
     if not result:
         print("Wizard closed without saving.")
         return
-    path, action = result
+    path, action, upgrade_to = result
     print(f"Saved {path}")
     if action == "save":
-        print(f"Next: ./fun-kube up {path.name} --dry-run   (then ./fun-kube up {path.name})")
+        if upgrade_to:
+            print(f"Next: ./fun-kube upgrade --to {upgrade_to} {path.name} --dry-run   "
+                  f"(then without --dry-run)")
+        else:
+            print(f"Next: ./fun-kube up {path.name} --dry-run   (then ./fun-kube up {path.name})")
         return
-    args = [sys.executable, str(_FUN_KUBE), "up", str(path)] + (["--dry-run"] if action == "dry-run" else [])
+    if action.startswith("upgrade"):
+        args = [sys.executable, str(_FUN_KUBE), "upgrade", "--to", upgrade_to, str(path)]
+    else:
+        args = [sys.executable, str(_FUN_KUBE), "up", str(path)]
+    args += ["--dry-run"] if action.endswith("dry-run") else []
     os.execv(sys.executable, args)

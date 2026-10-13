@@ -38,9 +38,18 @@ solo da tastiera (anche via SSH). Compila il `.env` passo per passo e alla fine 
   restano ai default.
 - **Cluster già installato**: i campi che `up` non può cambiare (nome, CIDR, VIP, versione,
   topologia) sono bloccati; si possono aggiungere worker e addon.
+- **Upgrade di Kubernetes** (cluster già installato): nel passo *Cluster* il wizard legge la
+  versione in esecuzione e propone l'ultima patch della stessa minor e l'ultima della minor
+  successiva (da pkgs.k8s.io), disabilitando quelle non compatibili con gli addon; se un upgrade
+  è stato interrotto propone di riprenderlo. Alla fine lancia `fun-kube upgrade --to …`
+  (dry-run o reale). Richiede che i nodi del `.env` coincidano con quelli del cluster: i nodi
+  nuovi si aggiungono prima con *provision*.
 - **Validazione** con le stesse regole di `up` prima di salvare; il `.env` precedente viene
-  salvato come `<file>.bak` e le variabili non gestite dal wizard vengono conservate.
-- **Fine**: *Save*, *Save + dry-run* o *Save + provision*.
+  salvato come `<file>.bak`. Le variabili non gestite dal wizard e quelle già presenti nel file
+  (anche di addon disattivati) vengono conservate.
+- **Fine**: anteprima completa del `.env` (scorrevole: `Tab` fino all'anteprima, poi frecce e
+  PgUp/PgDn), poi *Save*, *Save + dry-run* o *Save + provision* — oppure, con un upgrade
+  selezionato, *Save + upgrade dry-run* / *Save + upgrade*.
 - Test della connessione SSH a tutti i nodi direttamente dal passo *Access & network*.
 
 Tasti: `Tab`/`Shift+Tab` campi · `Ctrl+N`/`Ctrl+B` passo successivo/precedente · `F2` avanzate ·
