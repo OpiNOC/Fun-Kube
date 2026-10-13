@@ -3,6 +3,8 @@ CLI entry point — fun-kube up [env_file]
 """
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 import typer
@@ -33,19 +35,44 @@ def _version_callback(value: bool) -> None:
 
 def _wizard_callback(value: bool) -> None:
     if value:
+        _require_root()
         from .wizard import launch
         launch(Path.cwd())
         raise typer.Exit()
 
 
+# Comandi che leggono/scrivono /root/.kube/<cluster> e /root/<cluster>-manutenzione.txt
+# (anche dai ruoli Ansible eseguiti sulla bootstrap): senza root fallirebbero a metà,
+# dopo aver già modificato i nodi. Il wizard senza root non vede i cluster esistenti.
+_ROOT_COMMANDS = {"up", "upgrade", "reset", "diagnose", "wizard"}
+
+
+def _require_root() -> None:
+    if os.geteuid() == 0 or "--help" in sys.argv[1:]:
+        return
+    err.print(
+        "[red]Fun-Kube va eseguito come root sulla bootstrap machine[/]\n"
+        "(kubeconfig in /root/.kube/, file di manutenzione in /root/).\n"
+        "Con un utente che ha sudo:\n"
+        f"  sudo -i   poi   cd {Path.cwd()} && ./fun-kube ...\n"
+        "  oppure         sudo ./fun-kube ...\n"
+        "L'utente SSH sui nodi può invece essere non-root (SSH_USER con sudo senza password).",
+        soft_wrap=True,
+    )
+    raise typer.Exit(1)
+
+
 @app.callback()
 def _main(
+    ctx: typer.Context,
     version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True,
                                  help="Mostra la versione ed esce"),
     wizard: bool = typer.Option(False, "--wizard", callback=_wizard_callback, is_eager=True,
                                 help="Wizard interattivo (tastiera) che compila il .env e lancia up"),
 ) -> None:
     """Fun-Kube — provisioning e gestione di cluster Kubernetes (kubeadm)."""
+    if ctx.invoked_subcommand in _ROOT_COMMANDS:
+        _require_root()
 
 
 @app.command()

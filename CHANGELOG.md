@@ -14,6 +14,9 @@
   da pkgs.k8s.io, compatibilità con gli addon, ripresa di un upgrade interrotto) → lancia
   `fun-kube upgrade`; anteprima del `.env` completa e scorrevole; le variabili già presenti nel
   file vengono sempre conservate.
+- `up`, `upgrade`, `reset`, `diagnose` e il wizard si fermano subito se non eseguiti come root
+  (prima `up` falliva a metà, dopo aver già modificato i nodi; il wizard non vedeva i cluster
+  esistenti). Indicano come rilanciare con sudo.
 - Wizard: il dry-run (di `up` e di `upgrade`) gira dentro il wizard; al termine si torna a
   modificare, si esegue per davvero o si esce.
 

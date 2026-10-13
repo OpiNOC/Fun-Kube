@@ -136,7 +136,10 @@ Per aggiornare un componente: cambiare la versione in `versions.py`, eseguire
 
 ### Bootstrap machine
 Ubuntu 24.04 LTS. Può essere il tuo laptop, una VM di management, o il nodo stesso (modalità local-node).
-Fun-Kube va eseguito come **root** (kubeconfig in `/root/.kube/`, `~/.bashrc` di root).
+Fun-Kube va eseguito come **root** (kubeconfig in `/root/.kube/`, `~/.bashrc` di root): con un
+utente che ha sudo, `sudo -i` oppure `sudo ./fun-kube ...` (anche per il wizard). Senza root i comandi
+`up`, `upgrade`, `reset`, `diagnose` e il wizard si fermano subito con un messaggio. L'utente SSH sui
+nodi invece può essere non-root, con sudo senza password (`SSH_USER`).
 
 Tutte le dipendenze (Python, Ansible, kubectl, Helm) vengono **installate automaticamente** al primo `./fun-kube up`.
 
