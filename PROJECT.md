@@ -407,7 +407,7 @@ Test:
 
 ---
 
-### Addon monitoring — 2026-10-13 — DA TESTARE
+### Addon monitoring — 2026-10-13 — IN TEST
 
 Dalla guida observability di Enrico (kube-prometheus-stack 91.8.2 / Loki 18.13.7 / Alloy 1.13.0
 installati a mano sul cluster OPI, creato con Fun-Kube). Scelte:
@@ -448,9 +448,23 @@ kube-proxy (formato v1beta4, idempotente), replace dei manifest (idempotente, no
 `--listen-client-urls`), check capienza (5 scenari), `helm template` dei 4 chart con i values
 generati in 5 scenari (Service/Ingress Grafana, root_url, retention, volumi, Slack, toleration).
 
+Primo giro nel lab (2026-10-13, cluster nuovo HA 3 CP + 3 worker con NPM, Longhorn, MetalLB):
+- `control-plane-metrics.yml` eseguito senza errori sul cluster reale
+- worker con orologio indietro di ~1 giorno (VM ripristinate da snapshot con RAM) → apt
+  rifiutava i repository → controllo dell'orologio nel preflight + sync NTP prima di apt +
+  chrony `makestep 1 -1`
+- `--dry-run` non eseguiva il preflight (un `LOKI_STORAGE=1000Gi` passava) → ora lo esegue,
+  con stima dello spazio Longhorn
+- la stima non contava i volumi NPM creati prima nello stesso `up` (dry-run OK, poi stop sul
+  controllo reale: 18,2 GiB per worker) → stima al netto di NPM; default NPM ridotti
+- `helm upgrade` falliva: chiave `values` nel loop interpretata da Jinja come metodo `.values()`
+  del dict → rinominata; ora l'intero role è verificato eseguendolo con kubectl/helm finti
+- provisioning in corso con volumi ridotti (il cluster ha i volumi NPM vecchi, 5+10 GiB)
+
 Test da fare:
-- **Test 22** — lab HA: `MONITORING_ENABLED=true` con i default, poi verificare alert del
-  control plane spariti, dashboard "Log dei pod", eventi in Loki
+- **Test 22** — lab HA: completare l'installazione, poi verificare in `diagnose` nessun alert
+  attivo oltre a Watchdog (metriche control plane), IP Grafana mostrato a fine `up`,
+  dashboard "Log dei pod", eventi in Loki, `GRAFANA_ALLOWED_CIDRS`
 - **Test 23** — lab: valori da cluster grande (30/20/5/2) → `up` deve fermarsi sul controllo
   di capienza
 - **Test 24** — `fun-kube upgrade` su cluster con monitoring: le metriche del control plane
@@ -460,7 +474,7 @@ Test da fare:
   (`PROM_STORAGE=30Gi PROM_RETENTION_SIZE=25GB LOKI_STORAGE=20Gi GRAFANA_STORAGE=5Gi
   ALERTMANAGER_STORAGE=2Gi`)
 
-## Prossimi passi / idee (2026-10-08)
+## Prossimi passi / idee (aggiornato 2026-10-13)
 
 - **Test residui**: reset con il nuovo arresto pulito dei workload (verifica nessun processo
   in stato D), LOCAL_NODE (bootstrap = nodo)
@@ -471,9 +485,10 @@ Test da fare:
 - **Load worker2/worker3 ~3**: causa trovata (processi bloccati su NFS dopo un reset) → nuovo
   `reset` con arresto pulito dei workload e `--reboot`. DA TESTARE: reset del cluster HA con
   workload su PVC RWX, poi verificare che nessun nodo abbia processi in stato D
-- **Nuovi componenti** da aggiungere all'installazione (da definire)
-- **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
-  madmin/funkube, rimandato a quel momento)
+- **Monitoring**: completare i test 22-25 (sopra); poi eventuali ServiceMonitor per MetalLB,
+  Traefik, cert-manager
+- **Altri nuovi componenti**: da definire (il monitoring era il primo)
+- **Headlamp** (presente in madmin/funkube): da valutare dopo il monitoring
 - **Disco dedicato a Longhorn** (`LONGHORN_DISK=/dev/sdb`): evita di condividere lo spazio con il
   sistema e la riserva del 30% sul filesystem di root
 - **Disinstallazione addon** (`fun-kube addon uninstall <nome>`): oggi mettere un addon a
