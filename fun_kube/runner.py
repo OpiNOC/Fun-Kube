@@ -93,7 +93,8 @@ def write_output(cluster: ClusterConfig) -> None:
         lines += [
             "",
             "# Storage",
-            "StorageClass:    local-path (default)",
+            "StorageClass:    " + ("longhorn (default), local-path" if cluster.longhorn.enabled
+                                   else "local-path (default)"),
             "kubectl get storageclass",
         ]
 

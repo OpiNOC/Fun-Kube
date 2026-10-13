@@ -709,6 +709,11 @@ Ogni run può essere rieseguito senza danni:
 - swap: skip se già disabilitato
 - untaint: ok se taint già rimosso
 
+**Mononodo con Longhorn: una sola StorageClass default**
+Su topologia single-node local-path veniva sempre marcata default, e Longhorn lo è dalla sua
+ConfigMap → due StorageClass default. Ora local-path è default solo se Longhorn è disabilitato;
+con Longhorn resta installata ma non default (NPM su mononodo la usa in modo esplicito).
+
 **Reset: arresto pulito dei workload e processi bloccati**
 Nel lab, dopo un reset, due worker avevano load ~3 costante: processi in stato D (`nginx` del
 workload su volume RWX e il thread NFS del kernel) appesi da ore a uno share-manager Longhorn

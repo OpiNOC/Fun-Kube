@@ -36,11 +36,14 @@
     KUBECONFIG: /etc/kubernetes/admin.conf
   changed_when: false
 
-- name: Set local-path as default StorageClass
+# Default solo se Longhorn non è abilitato: con Longhorn sul mononodo la default è
+# longhorn (dalla sua ConfigMap), altrimenti ci sarebbero due StorageClass default.
+# local-path resta disponibile per uso esplicito (es. NPM su mononodo).
+- name: Set local-path default-class annotation
   ansible.builtin.command: >
     kubectl patch storageclass local-path
-    -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+    -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"{{ 'false' if longhorn_enabled | default(false) | bool else 'true' }}"}}}'
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
-  changed_when: true
-  ignore_errors: true
+  register: _lp_default
+  changed_when: "'no change' not in _lp_default.stdout"
