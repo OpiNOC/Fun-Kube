@@ -14,6 +14,38 @@ cp .env.example .env
 ./fun-kube up
 ```
 
+Oppure, con il wizard interattivo:
+
+```bash
+./fun-kube --wizard
+```
+
+---
+
+## Wizard interattivo
+
+`./fun-kube --wizard` (o `./fun-kube wizard`) apre un'interfaccia a terminale, stile k9s, usabile
+solo da tastiera (anche via SSH). Compila il `.env` passo per passo e alla fine può lanciare `up`.
+
+- **Più cluster**: all'avvio si sceglie un `.env` esistente da modificare o se ne crea uno nuovo
+  (`.env` per il cluster principale, `.env.<nome>` per gli altri).
+- **Passi**: Cluster → Nodes → Access & network → Add-ons → Monitoring → Review. Ogni passo ha una
+  breve spiegazione, ogni campo un suggerimento; il pannello in basso spiega il campo selezionato.
+- **Scelte a cascata**: compaiono solo le opzioni sensate date le scelte precedenti (es.
+  LoadBalancer solo con MetalLB, Longhorn obbligatorio con Nginx Proxy Manager su più nodi,
+  opzioni di Grafana secondo l'esposizione).
+- **Opzioni avanzate** (porte, volumi, retention, CIDR…) nascoste finché non si preme `F2`:
+  restano ai default.
+- **Cluster già installato**: i campi che `up` non può cambiare (nome, CIDR, VIP, versione,
+  topologia) sono bloccati; si possono aggiungere worker e addon.
+- **Validazione** con le stesse regole di `up` prima di salvare; il `.env` precedente viene
+  salvato come `<file>.bak` e le variabili non gestite dal wizard vengono conservate.
+- **Fine**: *Save*, *Save + dry-run* o *Save + provision*.
+- Test della connessione SSH a tutti i nodi direttamente dal passo *Access & network*.
+
+Tasti: `Tab`/`Shift+Tab` campi · `Ctrl+N`/`Ctrl+B` passo successivo/precedente · `F2` avanzate ·
+`Ctrl+S` riepilogo · `Ctrl+Q` esci. L'interfaccia del wizard è in inglese.
+
 ---
 
 ## Topologie supportate
@@ -453,6 +485,7 @@ Fun-Kube verifica le sovrapposizioni all'avvio e blocca con un errore chiaro se 
   --verbose                   # mostra le versioni
 
 ./fun-kube --version          # versione di Fun-Kube
+./fun-kube --wizard           # wizard interattivo: crea/modifica un .env e lancia up
 ```
 
 Ogni sottocomando accetta `--help` per la lista completa delle opzioni.
@@ -541,6 +574,7 @@ Fun-Kube/
 │   ├── deps.py                   # verifica e auto-install tool bootstrap
 │   ├── upgrade.py                # comando upgrade (controlli + esecuzione)
 │   ├── reset.py                  # comando reset (arresto workload, reset nodi)
+│   ├── wizard/                   # wizard TUI (Textual): model.py regole, app.py UI, texts.py testi
 │   └── versions.py               # versioni di tutti i componenti
 ├── scripts/
 │   └── vendor-manifests.py       # riscarica i manifest vendored

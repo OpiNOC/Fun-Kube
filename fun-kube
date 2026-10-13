@@ -48,6 +48,7 @@ def _ensure_deps() -> None:
             "typer>=0.12",
             "python-dotenv>=1.0",
             "rich>=13.0",
+            "textual>=8,<9",
         ],
         check=True,
     )

@@ -31,10 +31,19 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _wizard_callback(value: bool) -> None:
+    if value:
+        from .wizard import launch
+        launch(Path.cwd())
+        raise typer.Exit()
+
+
 @app.callback()
 def _main(
     version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True,
                                  help="Mostra la versione ed esce"),
+    wizard: bool = typer.Option(False, "--wizard", callback=_wizard_callback, is_eager=True,
+                                help="Wizard interattivo (tastiera) che compila il .env e lancia up"),
 ) -> None:
     """Fun-Kube — provisioning e gestione di cluster Kubernetes (kubeadm)."""
 
@@ -159,6 +168,13 @@ def up(
         console.print("  Password admin Grafana: kubectl -n monitoring get secret kube-prometheus-stack-grafana "
                       "-o jsonpath='{.data.admin-password}' | base64 -d; echo")
     console.print(f"\n  [yellow]Applica alias e kubeconfig:[/]  source ~/.bashrc\n")
+
+
+@app.command(name="wizard")
+def wizard_cmd() -> None:
+    """Wizard interattivo (tastiera): crea o modifica un .env e, se richiesto, lancia up."""
+    from .wizard import launch
+    launch(Path.cwd())
 
 
 @app.command(name="check-deps")

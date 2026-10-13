@@ -488,6 +488,27 @@ Test da fare:
   (`PROM_STORAGE=30Gi PROM_RETENTION_SIZE=25GB LOKI_STORAGE=20Gi GRAFANA_STORAGE=5Gi
   ALERTMANAGER_STORAGE=2Gi`)
 
+### Wizard interattivo (`fun-kube --wizard`) — 2026-10-13 — 1.1.0 in sviluppo
+
+Richiesta: interfaccia stile k9s, solo tastiera, che compila il `.env` e lancia `up`; scelte a
+cascata come il wizard web di madmin; spiegazioni chiare e sintetiche a ogni passo; più cluster;
+creazione e modifica; opzioni avanzate a parte; interfaccia in inglese.
+
+- `fun_kube/wizard/model.py`: logica senza UI — stato, regole a cascata (`visible()`,
+  `normalize()`, opzioni disponibili), lettura/scrittura `.env` (variabili sconosciute
+  conservate, backup `.bak`), controlli per passo in inglese, validazione finale con
+  `config.load()` (stesse regole di `up`)
+- `fun_kube/wizard/app.py`: Textual — scelta del file, 6 passi, help contestuale, `F2` avanzate,
+  campi bloccati se il cluster esiste (`kubectl get --raw /readyz` con il kubeconfig), test SSH
+- `fun_kube/wizard/texts.py`: testi (stile del wizard di madmin)
+- dopo il salvataggio `os.execv` di `fun-kube up [--dry-run]`: l'output di Ansible resta quello
+  di sempre
+- verificato con l'harness di Textual (tastiera simulata): file nuovo, flusso HA completo con
+  NPM + Longhorn forzato + monitoring, modifica di un `.env` esistente con cluster attivo
+  (campi bloccati, variabili conservate), mononodo locale, senza MetalLB, `F2`, Traefik +
+  clusterip; screenshot di ogni passo
+- i messaggi di `config.py` (validazione finale) restano in italiano
+
 ## Prossimi passi / idee (aggiornato 2026-10-13)
 
 - **Test residui**: reset con il nuovo arresto pulito dei workload (verifica nessun processo

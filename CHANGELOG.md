@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 — in sviluppo
+
+### Novità
+
+- **Wizard interattivo** `./fun-kube --wizard` (o `fun-kube wizard`): interfaccia a terminale stile
+  k9s, solo tastiera, in inglese. Crea o modifica il `.env` di uno o più cluster con scelte a
+  cascata, spiegazioni per ogni passo e campo, opzioni avanzate su `F2`, campi bloccati sui
+  cluster già installati, test SSH dei nodi, validazione con le regole di `up`; alla fine salva,
+  esegue il dry-run o lancia il provisioning. Nuova dipendenza: Textual (installata
+  automaticamente nel venv).
+
 ## 1.0.0 — 2026-10-13
 
 Prima versione stabile. Rispetto al codice precedente (commit `b31232b`): versioni aggiornate e
