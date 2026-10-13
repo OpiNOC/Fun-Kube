@@ -539,6 +539,19 @@ def ssh_keys() -> List[str]:
     return sorted(str(p.with_suffix("")) for p in home.glob("*.pub") if p.with_suffix("").exists())
 
 
+FUN_KUBE = Path(__file__).resolve().parents[2] / "fun-kube"
+
+
+def command(path: Path, action: str, upgrade_to: str = "") -> List[str]:
+    """fun-kube command line for a wizard action: up / dry-run / upgrade / upgrade-dry-run."""
+    import sys
+    if action.startswith("upgrade"):
+        args = [sys.executable, str(FUN_KUBE), "upgrade", "--to", upgrade_to, str(path)]
+    else:
+        args = [sys.executable, str(FUN_KUBE), "up", str(path)]
+    return args + (["--dry-run"] if action.endswith("dry-run") else [])
+
+
 # ---------------------------------------------------------------------------
 # Per-step checks (English messages for the wizard; config.load stays the final check)
 # ---------------------------------------------------------------------------

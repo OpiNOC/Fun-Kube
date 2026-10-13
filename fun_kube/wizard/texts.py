@@ -25,7 +25,8 @@ STEP_INTRO = {
     ),
     "Review": (
         "Check the result. The configuration is validated with the same rules used by "
-        "`fun-kube up`. Save only, run a dry-run (configuration + SSH checks, no changes), "
+        "`fun-kube up`. Save only, run a dry-run here (configuration + SSH checks, no changes; "
+        "then you can go back, run it for real or quit), "
         "or save and provision. With a Kubernetes upgrade selected (existing clusters), the last two "
         "run `fun-kube upgrade` instead."
     ),

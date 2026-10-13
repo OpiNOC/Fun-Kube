@@ -14,6 +14,8 @@
   da pkgs.k8s.io, compatibilità con gli addon, ripresa di un upgrade interrotto) → lancia
   `fun-kube upgrade`; anteprima del `.env` completa e scorrevole; le variabili già presenti nel
   file vengono sempre conservate.
+- Wizard: il dry-run (di `up` e di `upgrade`) gira dentro il wizard; al termine si torna a
+  modificare, si esegue per davvero o si esce.
 
 ## 1.0.0 — 2026-10-13
 

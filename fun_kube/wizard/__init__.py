@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 TEXTUAL_REQUIREMENT = "textual>=8,<9"
-_FUN_KUBE = Path(__file__).resolve().parents[2] / "fun-kube"
 
 
 def _ensure_textual() -> None:
@@ -20,9 +19,11 @@ def _ensure_textual() -> None:
 
 
 def launch(project_dir: Path) -> None:
-    """Run the wizard; then, if requested, hand over to `fun-kube up` (dry-run or real)."""
+    """Run the wizard; then, if requested, hand over to `fun-kube up` / `upgrade` (the real run:
+    it may ask for confirmations, so it runs in the plain terminal). Dry-runs run inside the wizard."""
     _ensure_textual()
     from .app import run
+    from .model import command
 
     result = run(project_dir)
     if not result:
@@ -37,9 +38,5 @@ def launch(project_dir: Path) -> None:
         else:
             print(f"Next: ./fun-kube up {path.name} --dry-run   (then ./fun-kube up {path.name})")
         return
-    if action.startswith("upgrade"):
-        args = [sys.executable, str(_FUN_KUBE), "upgrade", "--to", upgrade_to, str(path)]
-    else:
-        args = [sys.executable, str(_FUN_KUBE), "up", str(path)]
-    args += ["--dry-run"] if action.endswith("dry-run") else []
+    args = command(path, action, upgrade_to)
     os.execv(sys.executable, args)

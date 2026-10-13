@@ -50,6 +50,10 @@ solo da tastiera (anche via SSH). Compila il `.env` passo per passo e alla fine 
 - **Fine**: anteprima completa del `.env` (scorrevole: `Tab` fino all'anteprima, poi frecce e
   PgUp/PgDn), poi *Save*, *Save + dry-run* o *Save + provision* — oppure, con un upgrade
   selezionato, *Save + upgrade dry-run* / *Save + upgrade*.
+- **Dry-run dentro il wizard**: l'output scorre in una schermata del wizard; alla fine si sceglie
+  *Back to the wizard* (per correggere, `Esc`), *Provision now* / *Run the upgrade* (solo se il
+  dry-run è passato) o *Quit*. L'esecuzione reale esce dal wizard e gira nel terminale, perché
+  chiede conferme (e il nome del cluster se l'upgrade ferma i workload).
 - Test della connessione SSH a tutti i nodi direttamente dal passo *Access & network*.
 
 Tasti: `Tab`/`Shift+Tab` campi · `Ctrl+N`/`Ctrl+B` passo successivo/precedente · `F2` avanzate ·

@@ -9,13 +9,14 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import (Button, ContentSwitcher, Footer, Input, Label, OptionList,
-                             RadioButton, RadioSet, Static, Switch, TextArea)
+                             RadioButton, RadioSet, RichLog, Static, Switch, TextArea)
 from textual.widgets.option_list import Option
 
 from .. import __version__
@@ -67,6 +68,8 @@ Screen { layout: vertical; }
 #review-env { height: 1fr; min-height: 8; border: round $secondary; }
 #review-env:focus { border: round $accent; }
 #upgrade-box { height: auto; margin: 1 0 0 0; }
+#run-log { height: 1fr; border: round $secondary; }
+#run-status { height: auto; margin: 1 0 0 0; }
 Switch { width: auto; }
 RadioSet { width: 1fr; }
 """
@@ -465,7 +468,10 @@ class WizardScreen(Screen):
         model.save(self.state, self.path)
         action = {"save": "save", "save-dry": "dry-run", "save-up": "up",
                   "save-upg-dry": "upgrade-dry-run", "save-upg": "upgrade"}[event.button.id]
-        self.app.exit((self.path, action, self.state.upgrade_to))
+        if action.endswith("dry-run"):
+            self.app.push_screen(RunScreen(self.path, action, self.state.upgrade_to))
+        else:
+            self.app.exit((self.path, action, self.state.upgrade_to))
 
     # --- actions ----------------------------------------------------------
     def action_next(self) -> None:
@@ -486,6 +492,97 @@ class WizardScreen(Screen):
         self.advanced = not self.advanced
         self._refresh()
         self.notify("Advanced options " + ("shown" if self.advanced else "hidden"), timeout=2)
+
+
+# ---------------------------------------------------------------------------
+# Screen 3 — dry-run inside the wizard, then: back to edit / run for real / quit
+# ---------------------------------------------------------------------------
+
+class RunScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "back", "Back to the wizard", priority=True),
+        Binding("ctrl+q", "quit_saved", "Quit", priority=True),
+    ]
+
+    def __init__(self, path: Path, action: str, upgrade_to: str):
+        super().__init__()
+        self.path, self.action, self.upgrade_to = path, action, upgrade_to
+        self.upgrade = action.startswith("upgrade")
+        self.proc: Optional[subprocess.Popen] = None
+
+    def compose(self) -> ComposeResult:
+        what = f"upgrade to {self.upgrade_to}" if self.upgrade else "provisioning"
+        yield Static(f" Fun-Kube {__version__} — dry-run of the {what} · {self.path.name}", id="title")
+        with Vertical(id="main"):
+            yield Static("Checks only, nothing is changed on the cluster. "
+                         + ("Analysis: cluster health, add-on compatibility, Longhorn volumes, upgrade plan."
+                            if self.upgrade else
+                            "Configuration, comparison with the existing cluster, SSH preflight on every node."),
+                         classes="intro")
+            yield RichLog(id="run-log", wrap=True, markup=False, auto_scroll=True)
+            yield Static("Running…", id="run-status")
+            with Horizontal(classes="row"):
+                yield Button("Back to the wizard", id="run-back", variant="primary")
+                yield Button(f"Run the upgrade to {self.upgrade_to}" if self.upgrade else "Provision now",
+                             id="run-real", variant="warning", disabled=True)
+                yield Button("Quit", id="run-quit")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#run-back").focus()
+        self._run()
+
+    @work(thread=True, exclusive=True, group="run")
+    def _run(self) -> None:
+        log = self.query_one("#run-log", RichLog)
+        width = max(60, log.size.width - 4)
+        env = {**os.environ, "FORCE_COLOR": "1", "COLUMNS": str(width), "PYTHONUNBUFFERED": "1"}
+        try:
+            self.proc = subprocess.Popen(model.command(self.path, self.action, self.upgrade_to),
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         stdin=subprocess.DEVNULL, text=True, env=env, bufsize=1)
+            for line in self.proc.stdout:
+                self.app.call_from_thread(log.write, Text.from_ansi(line.rstrip("\n")))
+            rc = self.proc.wait()
+        except OSError as e:
+            self.app.call_from_thread(log.write, Text(str(e), style="red"))
+            rc = -1
+        self.app.call_from_thread(self._done, rc)
+
+    def _done(self, rc: int) -> None:
+        status = self.query_one("#run-status", Static)
+        real = self.query_one("#run-real", Button)
+        if rc == 0:
+            status.update("[green]✓ Dry-run passed — nothing was changed.[/] "
+                          + ("Run the upgrade now (it asks for confirmation, and for the cluster name if "
+                             "workloads must stop), go back to change something, or quit."
+                             if self.upgrade else
+                             "Provision now (it asks for confirmation), go back to change something, or quit."))
+            real.disabled = False
+            real.focus()
+        elif rc < 0 and self.proc is None:
+            status.update("[red]✗ Could not start fun-kube.[/]")
+        else:
+            status.update(f"[red]✗ Dry-run failed (exit {rc}).[/] Read the messages above, go back to "
+                          "the wizard to fix the configuration (or fix the cluster) and try again.")
+
+    def _stop(self) -> None:
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+
+    @on(Button.Pressed, "#run-back")
+    def action_back(self) -> None:
+        self._stop()
+        self.app.pop_screen()
+
+    @on(Button.Pressed, "#run-real")
+    def _real(self) -> None:
+        self.app.exit((self.path, "upgrade" if self.upgrade else "up", self.upgrade_to))
+
+    @on(Button.Pressed, "#run-quit")
+    def action_quit_saved(self) -> None:
+        self._stop()
+        self.app.exit((self.path, "save", self.upgrade_to))
 
 
 class WizardApp(App):
