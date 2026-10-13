@@ -780,7 +780,10 @@ repository ("Release file ... is not valid yet") e il bootstrap falliva; con un 
 sfasato anche i certificati del cluster risultano non validi. Ora il preflight (anche in
 `--dry-run`) confronta l'orologio di ogni nodo con la bootstrap ed è bloccante oltre 60s,
 indicando i comandi per correggerlo; il role `common` attiva la sincronizzazione NTP
-(chrony o systemd-timesyncd) prima di apt.
+(chrony o systemd-timesyncd) prima di apt. Causa nel lab: VM ripristinate da snapshot con
+RAM (l'orologio riparte da quello salvato). chrony configurato con `makestep 1 -1` (default
+Ubuntu `makestep 1 3`: dopo i primi aggiornamenti recupera lo scarto solo rallentando
+l'orologio, settimane per un giorno di scarto).
 
 **Mononodo con Longhorn: una sola StorageClass default**
 Su topologia single-node local-path veniva sempre marcata default, e Longhorn lo è dalla sua

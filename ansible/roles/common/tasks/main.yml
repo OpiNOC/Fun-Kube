@@ -203,11 +203,25 @@
     name: "{{ cluster_timezone }}"
   become: true
 
+# Default Ubuntu "makestep 1 3": chrony corregge a salti solo nei primi 3 aggiornamenti
+# dopo l'avvio, poi recupera rallentando/accelerando l'orologio. Dopo il ripristino di una
+# VM da snapshot con RAM (o una sospensione) lo scarto può essere di ore o giorni: con
+# "makestep 1 -1" l'orologio si riallinea a salto ogni volta che lo scarto supera 1s.
+# Per un nodo Kubernetes un salto è molto meno dannoso di uno scarto che persiste
+# (certificati non validi, repository apt rifiutati).
+- name: Let chrony step the clock whenever the offset exceeds 1s
+  ansible.builtin.lineinfile:
+    path: /etc/chrony/chrony.conf
+    regexp: '^makestep\s'
+    line: 'makestep 1 -1'
+  become: true
+  register: _chrony_conf
+
 - name: Enable and start chrony
   ansible.builtin.systemd:
     name: chrony
     enabled: true
-    state: started
+    state: "{{ 'restarted' if _chrony_conf is changed else 'started' }}"
   become: true
 
 - name: Enable and start iscsid (required by Longhorn)
