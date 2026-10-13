@@ -30,7 +30,8 @@ def up(
         Path(".env"),
         help="Percorso al file .env (default: .env nella directory corrente)",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Solo validazione, nessuna modifica"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Valida configurazione e preflight (solo lettura), nessuna modifica"),
     debug: bool = typer.Option(False, "--debug", help="Output verboso"),
     skip_checks: bool = typer.Option(False, "--skip-checks", help="Salta preflight checks"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Salta la conferma interattiva"),
@@ -81,7 +82,18 @@ def up(
     _print_cluster_summary(cluster)
 
     if dry_run:
-        console.print("\n[green]--dry-run: configurazione valida. Nessuna modifica effettuata.[/]")
+        # Il preflight è in sola lettura (SSH: risorse, porte, spazio): fa parte della
+        # verifica completa di un dry-run.
+        if not skip_checks:
+            console.print("\n[bold]Preflight checks (sola lettura)...[/]")
+            try:
+                preflight.run(cluster, debug=debug)
+            except preflight.PreflightError as e:
+                err.print(f"\n[red]Preflight fallito:[/]\n{e}")
+                raise typer.Exit(1)
+        console.print("\n[green]--dry-run: configurazione valida"
+                      + ("" if skip_checks else " e preflight superato")
+                      + ". Nessuna modifica effettuata.[/]")
         raise typer.Exit(0)
 
     if not yes:

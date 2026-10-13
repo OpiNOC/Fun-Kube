@@ -388,6 +388,9 @@ verifica prima che ci sia spazio prenotabile. I default sono per un cluster picc
 Prometheus 10Gi (retention 15 giorni / 8GB), Loki 10Gi (7 giorni), Grafana 1Gi, Alertmanager 1Gi
 = 22Gi, cioè ~44 GiB su Longhorn con 2 repliche (valori per cluster grandi nel `.env.example`).
 Sul mononodo usa local-path. Le dimensioni non si possono cambiare dopo l'installazione.
+Lo spazio viene verificato già da `up --dry-run`: su un cluster nuovo con una stima (70% del
+filesystem di `/var/lib` dei nodi, cioè il default di Longhorn), su un cluster esistente con i
+dati reali di Longhorn.
 
 **Metriche del control plane**: kubeadm le espone solo su `127.0.0.1`; con il monitoring
 abilitato Fun-Kube le porta su `0.0.0.0` (scheduler, controller-manager, etcd, kube-proxy),
@@ -418,7 +421,7 @@ Fun-Kube verifica le sovrapposizioni all'avvio e blocca con un errore chiaro se 
 
 ```bash
 ./fun-kube up [.env]          # provisiona il cluster
-  --dry-run                   # valida la configurazione senza modificare nulla
+  --dry-run                   # valida configurazione e preflight (SSH, sola lettura): nessuna modifica
   --debug                     # output verboso (Ansible -vv)
   --skip-checks               # salta i preflight check SSH
   --yes / -y                  # salta la conferma interattiva

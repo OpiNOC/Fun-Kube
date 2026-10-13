@@ -55,24 +55,33 @@ def main() -> int:
             free = max(free, int((maximum - reserved) * overprov / 100) - scheduled)
         nodes[n["metadata"]["name"]] = free
 
+    ok, msg = place(todo, nodes, replicas, f"over-provisioning {overprov}%")
+    print(msg)
+    return 0 if ok else 1
+
+
+def place(volumes, nodes: dict, replicas: int, basis: str = "") -> tuple:
+    """Piazza le repliche di ogni volume (byte) su nodi distinti (byte prenotabili
+    per nodo). Greedy: ogni replica sul nodo con più spazio. Ritorna (ok, messaggio).
+    Usata anche dal preflight di Fun-Kube per stimare lo spazio prima di installare."""
+    nodes = dict(nodes)
     report = ", ".join(f"{k} {v / GiB:.1f}GiB" for k, v in sorted(nodes.items()))
+    basis = f" ({basis})" if basis else ""
     if len(nodes) < replicas:
-        print(f"Nodi Longhorn schedulabili: {len(nodes)}, repliche richieste: {replicas}.")
-        return 1
-    for name, size in todo:          # greedy: ogni replica sul nodo con più spazio
+        return False, f"Nodi Longhorn schedulabili: {len(nodes)}, repliche richieste: {replicas}."
+    for name, size in volumes:
         best = sorted(nodes, key=lambda k: -nodes[k])[:replicas]
         if any(nodes[k] < size for k in best):
-            need = sum(b for _, b in todo) * replicas / GiB
-            print(f"Spazio Longhorn insufficiente per {name} ({size / GiB:.0f}GiB x {replicas} repliche).\n"
-                  f"  Totale richiesto: ~{need:.0f}GiB. Prenotabile per nodo (over-provisioning "
-                  f"{overprov}%): {report}.\n"
-                  f"  Aggiungere spazio ai dischi Longhorn o ridurre PROM_STORAGE / LOKI_STORAGE / "
-                  f"GRAFANA_STORAGE / ALERTMANAGER_STORAGE nel .env.")
-            return 1
+            need = sum(b for _, b in volumes) * replicas / GiB
+            return False, (
+                f"Spazio Longhorn insufficiente per {name} ({size / GiB:.0f}GiB x {replicas} repliche).\n"
+                f"  Totale richiesto: ~{need:.0f}GiB. Prenotabile per nodo{basis}: {report}.\n"
+                f"  Aggiungere spazio ai dischi Longhorn o ridurre PROM_STORAGE / LOKI_STORAGE / "
+                f"GRAFANA_STORAGE / ALERTMANAGER_STORAGE nel .env."
+            )
         for k in best:
             nodes[k] -= size
-    print(f"Spazio Longhorn sufficiente ({len(todo)} volumi x {replicas} repliche). Prenotabile: {report}.")
-    return 0
+    return True, f"Spazio Longhorn sufficiente ({len(volumes)} volumi x {replicas} repliche). Prenotabile{basis}: {report}."
 
 
 if __name__ == "__main__":

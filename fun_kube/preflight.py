@@ -43,6 +43,7 @@ def run(cluster: ClusterConfig, debug: bool = False) -> None:
     results: List[CheckResult] = []
     for node in cluster.nodes:
         results.extend(_check_node(node, cluster, debug))
+    results.extend(_estimate_monitoring_capacity(cluster, debug))
 
     _print_table(results)
 
@@ -50,6 +51,48 @@ def run(cluster: ClusterConfig, debug: bool = False) -> None:
     if failures:
         lines = [f"  [{r.node}] {r.check}: {r.detail}" for r in failures]
         raise PreflightError("\n".join(lines))
+
+
+# Default Longhorn: 30% del disco riservato, over-provisioning 100%.
+_LONGHORN_RESERVABLE = 0.70
+
+
+def _estimate_monitoring_capacity(cluster: ClusterConfig, debug: bool) -> List[CheckResult]:
+    """Cluster nuovo con monitoring su longhorn-monitoring: stima lo spazio prenotabile su
+    Longhorn dalla dimensione del filesystem di /var/lib (dove Longhorn tiene i dati) sui
+    nodi schedulabili, prima di installare qualsiasi cosa. Su cluster esistente il
+    controllo esatto (dati reali di Longhorn) è in check_existing_cluster."""
+    import importlib.util
+    from pathlib import Path
+    from .config import quantity_bytes
+
+    m = cluster.monitoring
+    if not (m.enabled and cluster.longhorn.enabled and m.create_longhorn_sc):
+        return []
+    nodes = cluster.workers or cluster.control_planes
+
+    def run(node, cmd):
+        return _local(cmd, debug) if cluster.local_node else _ssh(node, cluster, cmd, debug)
+
+    free = {}
+    for n in nodes:
+        if run(n, _JOINED_CHECK)[0] == 0:
+            return []      # cluster esistente: controllo esatto altrove
+        rc, out, _ = run(n, "df -B1 --output=size /var/lib | tail -1")
+        if rc != 0 or not out.strip().isdigit():
+            return []      # SSH già segnalato dai check del nodo
+        free[n.hostname] = int(int(out.strip()) * _LONGHORN_RESERVABLE)
+
+    script = Path(__file__).resolve().parent.parent / "ansible/roles/monitoring/files/longhorn_capacity.py"
+    spec = importlib.util.spec_from_file_location("longhorn_capacity", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    volumes = sorted([("prometheus", quantity_bytes(m.prom_storage)), ("loki", quantity_bytes(m.loki_storage)),
+                      ("grafana", quantity_bytes(m.grafana_storage)),
+                      ("alertmanager", quantity_bytes(m.alertmanager_storage))], key=lambda v: -v[1])
+    ok, msg = mod.place(volumes, free, cluster.monitoring_sc_replicas, "stima: 70% del disco di /var/lib")
+    return [CheckResult(node="monitoring", check="spazio Longhorn (stima)", ok=ok,
+                        detail="" if ok else msg)]
 
 
 _JOINED_CHECK = "test -f /etc/kubernetes/kubelet.conf"
@@ -405,6 +448,14 @@ def check_existing_cluster(cluster: ClusterConfig) -> Tuple[List[str], List[str]
                         "    Le dimensioni dei volumi del monitoring non cambiano con un upgrade Helm\n"
                         f"    (template dei volumi immutabili): impostare {key}={current} nel .env."
                     )
+        # Spazio Longhorn per i volumi non ancora creati: stesso controllo che up esegue
+        # prima di installare il monitoring, anticipato qui (anche in --dry-run) quando
+        # Longhorn è già installato.
+        if not errors:
+            capacity_error = _monitoring_longhorn_capacity(cluster, kubectl, env)
+            if capacity_error:
+                errors.append(capacity_error)
+
         if m.grafana_admin_password:
             rc, out = kubectl("get", "secret", "kube-prometheus-stack-grafana", "-n", "monitoring",
                               "-o", "jsonpath={.data.admin-password}")
@@ -432,3 +483,43 @@ def check_existing_cluster(cluster: ClusterConfig) -> Tuple[List[str], List[str]
             )
 
     return errors, warnings
+
+
+def _monitoring_longhorn_capacity(cluster: ClusterConfig, kubectl, env: dict) -> str:
+    """Esegue longhorn_capacity.py se la StorageClass del monitoring è (o sarà) Longhorn
+    e Longhorn è già installato. Ritorna il messaggio d'errore o ''."""
+    import sys
+    from pathlib import Path
+    from .config import quantity_bytes
+
+    m = cluster.monitoring
+    rc, out = kubectl("get", "storageclass", m.storage_class,
+                      "-o", "jsonpath={.provisioner}/{.parameters.numberOfReplicas}")
+    if rc == 0 and out:
+        provisioner, _, replicas = out.partition("/")
+        if provisioner != "driver.longhorn.io":
+            return ""
+    elif m.create_longhorn_sc:
+        replicas = str(cluster.monitoring_sc_replicas)   # la creerà Fun-Kube
+    else:
+        return ""
+    if kubectl("get", "nodes.longhorn.io", "-n", "longhorn-system")[0] != 0:
+        return ""   # Longhorn non ancora installato: controllo rimandato a up
+
+    script = Path(__file__).resolve().parent.parent / "ansible/roles/monitoring/files/longhorn_capacity.py"
+    pvcs = {
+        "prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0": m.prom_storage,
+        "storage-loki-0": m.loki_storage,
+        "kube-prometheus-stack-grafana": m.grafana_storage,
+        "alertmanager-kube-prometheus-stack-alertmanager-db-alertmanager-kube-prometheus-stack-alertmanager-0":
+            m.alertmanager_storage,
+    }
+    try:
+        r = subprocess.run(
+            [sys.executable, str(script), replicas or "1", "monitoring",
+             *(f"{name}={quantity_bytes(size)}" for name, size in pvcs.items())],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+    except (subprocess.TimeoutExpired, ValueError):
+        return ""
+    return r.stdout.strip() if r.returncode == 1 else ""

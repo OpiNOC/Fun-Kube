@@ -558,6 +558,9 @@ def _validate(cfg: ClusterConfig) -> List[str]:
                         f"GRAFANA_ALLOWED_CIDRS: '{c}' non è un CIDR valido "
                         "(separati da virgola, es. 10.0.0.0/24,192.168.10.0/24)."
                     )
+            if any(c.strip() in ("0.0.0.0/0", "::/0") for c in m.grafana_allowed_cidrs):
+                warnings.append("GRAFANA_ALLOWED_CIDRS contiene 0.0.0.0/0: nessuna restrizione "
+                                "(equivale a lasciarla vuota).")
         elif m.grafana_allowed_cidrs:
             warnings.append("GRAFANA_ALLOWED_CIDRS vale solo con GRAFANA_EXPOSE=loadbalancer: ignorata.")
         if m.grafana_traefik_ingress:

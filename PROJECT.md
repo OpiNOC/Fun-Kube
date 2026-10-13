@@ -434,6 +434,11 @@ installati a mano sul cluster OPI, creato con Fun-Kube). Scelte:
 - controllo capienza Longhorn prima dell'installazione (`files/longhorn_capacity.py`): i
   worker del lab (dischi 47 GiB → ~31 GiB prenotabili, ~93 in tutto) bastano per i default
   (44 GiB) ma NON per i valori da cluster grande (114 GiB)
+- controllo dello spazio anticipato (richiesta di Marco: `LOKI_STORAGE=1000Gi` passava il
+  dry-run): `up --dry-run` ora esegue anche il preflight (sola lettura); cluster nuovo → stima
+  dal filesystem di `/var/lib` dei nodi schedulabili (70%, default Longhorn); cluster esistente
+  → `check_existing_cluster` con i dati reali di Longhorn (stesso script `longhorn_capacity.py`,
+  funzione `place()`)
 - limiti inotify (`/etc/sysctl.d/99-inotify.conf`) nel role `common` per tutti i cluster
 - versioni: kube-prometheus-stack 92.3.0 (91→92: solo nodeSelector linux, un riavvio),
   Loki 18.15.1, Alloy 1.13.1
@@ -613,7 +618,7 @@ CIDR da tenere non sovrapposti: `POD_CIDR`, `SERVICE_CIDR`, `METALLB_IP_POOL`.
 
 ```bash
 ./fun-kube up [.env]          # provisiona il cluster
-  --dry-run                   # solo validazione, nessuna modifica
+  --dry-run                   # configurazione + preflight (sola lettura), nessuna modifica
   --debug                     # output verboso (ansible -vv)
   --skip-checks               # salta preflight
   --yes / -y                  # salta la conferma interattiva (es. automazione)
