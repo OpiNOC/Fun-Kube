@@ -128,17 +128,17 @@
         helm upgrade --install {{ item.release }} {{ item.chart }}
         --namespace {{ monitoring_namespace }}
         --version {{ item.version }}
-        --values /tmp/fun-kube-{{ cluster_name }}-{{ item.values }}.yaml
+        --values /tmp/fun-kube-{{ cluster_name }}-{{ item.vfile }}.yaml
         --wait --timeout {{ item.timeout }}
       loop:
         - {release: kube-prometheus-stack, chart: prometheus-community/kube-prometheus-stack,
-           version: "{{ kps_chart_version }}", values: kps-values, timeout: 15m}
+           version: "{{ kps_chart_version }}", vfile: kps-values, timeout: 15m}
         - {release: loki, chart: grafana-community/loki,
-           version: "{{ loki_chart_version }}", values: loki-values, timeout: 10m}
+           version: "{{ loki_chart_version }}", vfile: loki-values, timeout: 10m}
         - {release: alloy-logs, chart: grafana/alloy,
-           version: "{{ alloy_chart_version }}", values: alloy-logs-values, timeout: 10m}
+           version: "{{ alloy_chart_version }}", vfile: alloy-logs-values, timeout: 10m}
         - {release: alloy-events, chart: grafana/alloy,
-           version: "{{ alloy_chart_version }}", values: alloy-events-values, timeout: 10m}
+           version: "{{ alloy_chart_version }}", vfile: alloy-events-values, timeout: 10m}
       loop_control:
         label: "{{ item.release }} {{ item.version }}"
       changed_when: true
