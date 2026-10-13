@@ -113,10 +113,20 @@ def _estimate_monitoring_capacity(cluster: ClusterConfig, debug: bool) -> List[C
     spec = importlib.util.spec_from_file_location("longhorn_capacity", script)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    # Volumi Longhorn che up crea PRIMA del monitoring (stesso run): vanno sottratti.
+    # NPM su multi-nodo: MariaDB 5Gi (longhorn) + dati condivisi 10Gi (longhorn-rwx).
+    others = []
+    if cluster.ingress.enabled and cluster.ingress.type == "nginx-proxy-manager" \
+            and cluster.topology != "single-node":
+        others = [("npm-shared", 10 * 1024 ** 3), ("npm-mariadb-data", 5 * 1024 ** 3)]
+    for _, size in others:
+        for k in sorted(free, key=lambda k: -free[k])[:cluster.longhorn_replicas]:
+            free[k] -= size
+    basis = "stima: 70% del disco di /var/lib" + (", al netto dei volumi NPM" if others else "")
     volumes = sorted([("prometheus", quantity_bytes(m.prom_storage)), ("loki", quantity_bytes(m.loki_storage)),
                       ("grafana", quantity_bytes(m.grafana_storage)),
                       ("alertmanager", quantity_bytes(m.alertmanager_storage))], key=lambda v: -v[1])
-    ok, msg = mod.place(volumes, free, cluster.monitoring_sc_replicas, "stima: 70% del disco di /var/lib")
+    ok, msg = mod.place(volumes, free, cluster.monitoring_sc_replicas, basis)
     return [CheckResult(node="monitoring", check="spazio Longhorn (stima)", ok=ok,
                         detail="" if ok else msg)]
 
