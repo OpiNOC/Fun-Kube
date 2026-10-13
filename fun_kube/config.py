@@ -58,6 +58,8 @@ class IngressConfig:
     npm_https_nodeport: int
     npm_admin_nodeport: int
     npm_db_password: str
+    npm_db_storage: str            # PVC MariaDB
+    npm_data_storage: str          # PVC dati condivisi (config nginx, certificati, log)
 
 
 @dataclass
@@ -463,6 +465,8 @@ def _parse_ingress(env: dict) -> IngressConfig:
         npm_https_nodeport=int(env.get("NPM_HTTPS_NODEPORT", "30443") or "30443"),
         npm_admin_nodeport=int(env.get("NPM_ADMIN_NODEPORT", "30081") or "30081"),
         npm_db_password=env.get("NPM_DB_PASSWORD", "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW").strip(),
+        npm_db_storage=_str(env, "NPM_DB_STORAGE", "1Gi"),
+        npm_data_storage=_str(env, "NPM_DATA_STORAGE", "2Gi"),
     )
 
 
@@ -534,6 +538,14 @@ def _validate(cfg: ClusterConfig) -> List[str]:
             f"Longhorn: {cfg.longhorn_replicas} nodi schedulabili — repliche impostate a "
             f"{cfg.longhorn_replicas} ({redundancy})."
         )
+
+    if cfg.ingress.enabled and cfg.ingress.type == "nginx-proxy-manager":
+        for key, val in (("NPM_DB_STORAGE", cfg.ingress.npm_db_storage),
+                         ("NPM_DATA_STORAGE", cfg.ingress.npm_data_storage)):
+            try:
+                quantity_bytes(val)
+            except ValueError:
+                errors.append(f"{key} non valido: '{val}' (es. 1Gi, 2Gi).")
 
     # Monitoring
     m = cfg.monitoring

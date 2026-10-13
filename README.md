@@ -289,7 +289,9 @@ NPM_ADMIN_NODEPORT=30081
 NPM_DB_PASSWORD=cambia-questa-password
 ```
 
-NPM viene installato come **DaemonSet** (un pod per nodo). La UI di amministrazione è accessibile sulla porta 81 (LB) o sulla `NPM_ADMIN_NODEPORT` (NodePort).
+NPM viene installato come **DaemonSet** (un pod per nodo). Volumi: `NPM_DB_STORAGE=1Gi` (MariaDB)
+e `NPM_DATA_STORAGE=2Gi` (configurazioni, certificati e log di accesso; da aumentare per proxy
+con molto traffico). I volumi esistenti non vengono mai ridotti. La UI di amministrazione è accessibile sulla porta 81 (LB) o sulla `NPM_ADMIN_NODEPORT` (NodePort).
 
 Login di default UI: `admin@example.com` / `changeme` — **cambiare al primo accesso.**
 

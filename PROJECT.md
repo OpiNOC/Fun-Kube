@@ -474,6 +474,8 @@ Test da fare:
 - **Nuovi componenti** da aggiungere all'installazione (da definire)
 - **Visibilità del cluster con persistenza**: da discutere (Headlamp, presente in
   madmin/funkube, rimandato a quel momento)
+- **Disco dedicato a Longhorn** (`LONGHORN_DISK=/dev/sdb`): evita di condividere lo spazio con il
+  sistema e la riserva del 30% sul filesystem di root
 - **Disinstallazione addon** (`fun-kube addon uninstall <nome>`): oggi mettere un addon a
   `false` lo lascia installato. I playbook uninstall di madmin vanno corretti (usano `helm`
   sui CP, dove non è installato)
@@ -773,6 +775,16 @@ Ogni run può essere rieseguito senza danni:
 - containerd: rigenera config solo se diverso
 - swap: skip se già disabilitato
 - untaint: ok se taint già rimosso
+
+**Volumi di default ridotti (NPM)**
+NPM creava MariaDB 5Gi + dati 10Gi con 3 repliche Longhorn = 45 GiB sul cluster per dati di
+pochi MB (configurazioni) più i log di accesso: nel lab lasciava ~18 GiB per worker e il
+monitoring non ci stava. Ora `NPM_DB_STORAGE=1Gi`, `NPM_DATA_STORAGE=2Gi` (configurabili, 9 GiB
+con 3 repliche). Su cluster esistenti `check_existing_cluster` mantiene la dimensione dei PVC
+più grandi (un PVC non si riduce: l'apply fallirebbe) e consente l'espansione su Longhorn.
+La riserva Longhorn del 30% resta invariata: i dati stanno sul filesystem di sistema (immagini,
+log, soglie di eviction di kubelet); per la produzione l'opzione giusta sarebbe un disco
+dedicato a Longhorn (idea futura: `LONGHORN_DISK`).
 
 **Orologio dei nodi**
 Nel lab (2026-10-13) i worker avevano l'orologio indietro di ~1 giorno: apt rifiutava i

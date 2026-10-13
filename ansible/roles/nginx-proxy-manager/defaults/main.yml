@@ -5,4 +5,6 @@ npm_http_nodeport: 30080
 npm_https_nodeport: 30443
 npm_admin_nodeport: 30081
 npm_db_password: "T1sh-PwD-Sh0ulD-B3-Ch4nGeD-NOW"
+npm_db_storage: 1Gi
+npm_data_storage: 2Gi
 ingress_service_type: nodeport

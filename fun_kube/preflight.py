@@ -114,11 +114,13 @@ def _estimate_monitoring_capacity(cluster: ClusterConfig, debug: bool) -> List[C
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     # Volumi Longhorn che up crea PRIMA del monitoring (stesso run): vanno sottratti.
-    # NPM su multi-nodo: MariaDB 5Gi (longhorn) + dati condivisi 10Gi (longhorn-rwx).
+    # NPM su multi-nodo: MariaDB (longhorn) + dati condivisi (longhorn-rwx).
     others = []
     if cluster.ingress.enabled and cluster.ingress.type == "nginx-proxy-manager" \
             and cluster.topology != "single-node":
-        others = [("npm-shared", 10 * 1024 ** 3), ("npm-mariadb-data", 5 * 1024 ** 3)]
+        others = sorted([("npm-shared", quantity_bytes(cluster.ingress.npm_data_storage)),
+                         ("npm-mariadb-data", quantity_bytes(cluster.ingress.npm_db_storage))],
+                        key=lambda v: -v[1])
     for _, size in others:
         for k in sorted(free, key=lambda k: -free[k])[:cluster.longhorn_replicas]:
             free[k] -= size
@@ -453,6 +455,33 @@ def check_existing_cluster(cluster: ClusterConfig) -> Tuple[List[str], List[str]
                     "    Ripristinare il valore originale, oppure cambiarla prima dentro MariaDB\n"
                     "    (procedura nel file /root/<cluster>-manutenzione.txt)."
                 )
+
+    # --- Volumi NPM esistenti: un PVC non si riduce ---
+    if cluster.ingress.enabled and cluster.ingress.type == "nginx-proxy-manager":
+        from .config import quantity_bytes
+        ing = cluster.ingress
+        for pvc, key, attr in (("npm-mariadb-data", "NPM_DB_STORAGE", "npm_db_storage"),
+                               ("npm-shared", "NPM_DATA_STORAGE", "npm_data_storage")):
+            rc, current = kubectl("get", "pvc", pvc, "-n", "npm-system",
+                                  "-o", "jsonpath={.spec.resources.requests.storage}")
+            if rc != 0 or not current:
+                continue
+            wanted = getattr(ing, attr)
+            try:
+                cur_b, want_b = quantity_bytes(current), quantity_bytes(wanted)
+            except ValueError:
+                continue
+            if want_b < cur_b:
+                # Mantiene la dimensione esistente (es. cluster creati con i vecchi default)
+                setattr(ing, attr, current)
+                warnings.append(f"NPM: volume {pvc} esistente da {current}, {key}={wanted} ignorato "
+                                f"(un volume non si può ridurre).")
+            elif want_b > cur_b:
+                if cluster.topology == "single-node":
+                    errors.append(f"{key}={wanted} maggiore del volume esistente {pvc} ({current}): "
+                                  "local-path non supporta l'espansione dei volumi.")
+                else:
+                    warnings.append(f"NPM: il volume {pvc} verrà espanso da {current} a {wanted} (Longhorn).")
 
     # --- Monitoring già installato (adozione / re-run) ---
     if cluster.monitoring.enabled:

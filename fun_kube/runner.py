@@ -514,6 +514,8 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict
         "npm_https_nodeport": cluster.ingress.npm_https_nodeport,
         "npm_admin_nodeport": cluster.ingress.npm_admin_nodeport,
         "npm_db_password": cluster.ingress.npm_db_password,
+        "npm_db_storage": cluster.ingress.npm_db_storage,
+        "npm_data_storage": cluster.ingress.npm_data_storage,
         # DN-essence
         "dn_essence_enabled": cluster.dn_essence.enabled,
         "dn_essence_ui_nodeport": cluster.dn_essence.ui_nodeport,

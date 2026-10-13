@@ -17,7 +17,7 @@ spec:
   storageClassName: {{ "local-path" if topology == "single-node" else "longhorn" }}
   resources:
     requests:
-      storage: 5Gi
+      storage: {{ npm_db_storage }}
 ---
 ###
 ### PVC NPM — RWO su single-node, RWX su multi-node (condiviso tra pod DaemonSet)
@@ -38,7 +38,7 @@ spec:
 {% endif %}
   resources:
     requests:
-      storage: 10Gi
+      storage: {{ npm_data_storage }}
 ---
 apiVersion: v1
 kind: Secret
