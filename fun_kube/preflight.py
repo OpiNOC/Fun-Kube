@@ -53,6 +53,32 @@ def run(cluster: ClusterConfig, debug: bool = False) -> None:
         raise PreflightError("\n".join(lines))
 
 
+_MAX_CLOCK_SKEW = 60   # secondi
+
+
+def _check_clock(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> CheckResult:
+    """Differenza tra l'orologio del nodo e quello della bootstrap. Con l'orologio sfasato
+    apt rifiuta i repository ("Release file ... is not valid yet") e i certificati del
+    cluster risultano non ancora validi / scaduti (join e TLS falliscono)."""
+    import time
+    before = time.time()
+    rc, out, err = _ssh(node, cluster, "date +%s", debug)
+    after = time.time()
+    if rc != 0 or not out.strip().isdigit():
+        return CheckResult(node=node.hostname, check="orologio", ok=False, detail=(err or out).strip()[:80])
+    skew = int(out.strip()) - (before + after) / 2
+    if abs(skew) <= _MAX_CLOCK_SKEW:
+        return CheckResult(node=node.hostname, check=f"orologio (scarto {skew:+.0f}s)", ok=True)
+    hours = abs(skew) / 3600
+    when = f"{hours:.1f} ore" if hours >= 1 else f"{abs(skew):.0f} secondi"
+    return CheckResult(
+        node=node.hostname, check="orologio", ok=False,
+        detail=(f"{'avanti' if skew > 0 else 'indietro'} di {when} rispetto alla bootstrap. "
+                f"Sul nodo: timedatectl set-ntp true && systemctl restart systemd-timesyncd "
+                f"(NTP irraggiungibile: date -s @$(date +%s) dalla bootstrap)"),
+    )
+
+
 # Default Longhorn: 30% del disco riservato, over-provisioning 100%.
 _LONGHORN_RESERVABLE = 0.70
 
@@ -160,6 +186,7 @@ def _check_node_ssh(node: NodeConfig, cluster: ClusterConfig, debug: bool) -> Li
         return results
 
     results.append(check("sudo no-password", "sudo -n true"))
+    results.append(_check_clock(node, cluster, debug))
 
     if _ssh(node, cluster, _JOINED_CHECK, debug)[0] == 0:
         results.append(CheckResult(node=node.hostname, check=_JOINED_LABEL, ok=True))

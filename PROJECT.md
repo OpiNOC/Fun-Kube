@@ -774,6 +774,14 @@ Ogni run può essere rieseguito senza danni:
 - swap: skip se già disabilitato
 - untaint: ok se taint già rimosso
 
+**Orologio dei nodi**
+Nel lab (2026-10-13) i worker avevano l'orologio indietro di ~1 giorno: apt rifiutava i
+repository ("Release file ... is not valid yet") e il bootstrap falliva; con un orologio
+sfasato anche i certificati del cluster risultano non validi. Ora il preflight (anche in
+`--dry-run`) confronta l'orologio di ogni nodo con la bootstrap ed è bloccante oltre 60s,
+indicando i comandi per correggerlo; il role `common` attiva la sincronizzazione NTP
+(chrony o systemd-timesyncd) prima di apt.
+
 **Mononodo con Longhorn: una sola StorageClass default**
 Su topologia single-node local-path veniva sempre marcata default, e Longhorn lo è dalla sua
 ConfigMap → due StorageClass default. Ora local-path è default solo se Longhorn è disabilitato;

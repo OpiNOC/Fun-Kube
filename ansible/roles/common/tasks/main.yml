@@ -151,6 +151,36 @@
   become: true
   changed_when: false
 
+# Orologio prima di apt: con l'orologio indietro apt rifiuta i repository ("Release file
+# is not valid yet") e chrony, installato più sotto, non arriverebbe mai. Best effort:
+# il preflight blocca comunque scarti oltre 60s.
+- name: Enable NTP time synchronization (best effort)
+  ansible.builtin.shell: |
+    if systemctl is-active --quiet chrony; then
+      chronyc makestep >/dev/null 2>&1 || true
+    else
+      timedatectl set-ntp true 2>/dev/null || true
+      systemctl restart systemd-timesyncd 2>/dev/null || true
+    fi
+    for i in $(seq 1 15); do
+      [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = "yes" ] && exit 0
+      sleep 2
+    done
+    echo "not-synchronized"
+  args:
+    executable: /bin/bash
+  become: true
+  register: _ntp_sync
+  changed_when: false
+  failed_when: false
+
+- name: Warn — clock not synchronized
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: orologio non sincronizzato via NTP (server NTP raggiungibili?).
+      Uno scarto rende invalidi repository apt e certificati del cluster.
+  when: "'not-synchronized' in _ntp_sync.stdout"
+
 - name: Install base packages
   ansible.builtin.apt:
     name:
