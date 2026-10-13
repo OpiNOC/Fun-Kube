@@ -54,7 +54,7 @@ Il tool si auto-configura da solo. Non servono altri comandi.
 | fun_kube/preflight.py         | ✓ local + SSH checks (nodi nuovi anche su cluster esistente); confronto .env ↔ cluster |
 | fun_kube/runner.py            | ✓ inventory, sequenza playbook (longhorn prima di ingress), Ctrl+C; output addon; longhorn_replicas dinamico |
 | fun_kube/cli.py               | ✓ up, check-deps, reset (unmount pre-kubeadm reset), diagnose (nodi + addon + keepalived MASTER/BACKUP), upgrade; config_warnings |
-| fun_kube/upgrade.py           | ✓ upgrade kubeadm patch e +1 minor, ripresa, check Longhorn (Test 16-21) — mononodo da testare |
+| fun_kube/upgrade.py           | ✓ upgrade kubeadm patch e +1 minor, ripresa, check Longhorn, mononodo (Test 16-21) |
 | fun_kube/deps.py              | ✓ check + auto-install tools (kubectl pinnato, Helm 4) |
 | fun_kube/versions.py          | ✓ versioni componenti, manifest vendored, compatibilità addon ↔ K8s |
 | ansible/roles/common          | ✓ testato                      |
@@ -255,7 +255,7 @@ Implementazione e bug trovati/fixati:
   da Longhorn (max 1 minor version alla volta) → rimosso default hardcoded,
   versione sempre risolta da Python (GitHub API)
 
-### Upgrade di Kubernetes (`fun-kube upgrade`) — 2026-10-08 — TESTATO (manca mononodo)
+### Upgrade di Kubernetes (`fun-kube upgrade`) — 2026-10-08 — TESTATO
 
 Design concordato: patch o +1 minor per esecuzione; drain → upgrade → uncordon un nodo
 alla volta; ripresa automatica; snapshot etcd sulla bootstrap; `.env` aggiornato a fine
@@ -299,7 +299,13 @@ Test:
   messaggi che spiegano di attendere, piano di ripresa con "kubelet (control plane già a ...)".
   Ogni esecuzione fa un nuovo snapshot etcd (anche le riprese): pulizia manuale di
   `output/backups/`
-- **Test 20** — DA FARE: mononodo — conferma col nome del cluster, upgrade senza drain
+- **Test 13 ✓ (2026-10-13)** — mononodo remoto (1 CP, untaint) con MetalLB, NPM (PVC su
+  local-path), Longhorn, DN-essence: tutto Running, tigerastatus apiserver/tiers ok su
+  installazione da zero. Trovato: due StorageClass default (local-path + longhorn) → fix
+- **Test 20 ✓ (2026-10-13)** — upgrade mononodo 1.35.4 → 1.35.9: piano "FERMO WORKLOAD" (solo
+  cordon), conferma col nome del cluster, nodo a v1.35.9, tutti i pod Running. Riavvii attesi
+  di etcd e dei controller con leader election (tigera-operator, sidecar CSI Longhorn) durante
+  l'indisponibilità dell'API server
 
 ### Modifiche su cluster esistente (re-run di `up`) — 2026-10-08
 
@@ -326,7 +332,7 @@ Se il cluster non è raggiungibile il confronto viene saltato.
 Fix inclusi: il patch diretto delle repliche sulla SC `longhorn` era rifiutato dall'API
 (`parameters` immutabili) → `up` falliva già alla prima installazione con < 3 nodi schedulabili.
 
-### Aggiornamento versioni — 2026-10-08 — PARZIALMENTE TESTATO
+### Aggiornamento versioni — 2026-10-08 — TESTATO
 
 | Componente | Versione |
 |---|---|
@@ -359,7 +365,7 @@ Test:
   (ricreata da longhorn-manager dalla ConfigMap: log "Updated the default Longhorn
   StorageClass") e `longhorn-rwx`; PVC esistenti Bound (restano a 2 repliche, come previsto)
 - **Test 12** — stesso cluster con NPM al posto di Traefik
-- **Test 13** — mononodo LOCAL_NODE (local-path, metrics-server: `kubectl top nodes`)
+- **Test 13** — vedi sopra (mononodo remoto). LOCAL_NODE (bootstrap = nodo) non ritestato
 - **Test 14 ✓ (2026-10-12)** — re-run `up -y` su cluster HA 3+3 allineato (Longhorn, Traefik,
   MetalLB, DN-essence, workload su PVC): nessun pod ricreato (UID invariati) né riavviato,
   quasi tutti i play `changed=0`; Longhorn ora salta l'apply (versione letta dalla label)
@@ -401,7 +407,8 @@ Test:
 
 ## Prossimi passi / idee (2026-10-08)
 
-- **Completare i test**: 13 e 20 (mononodo)
+- **Test residui**: reset con il nuovo arresto pulito dei workload (verifica nessun processo
+  in stato D), LOCAL_NODE (bootstrap = nodo)
 - **Calico APIServer**: aggiunto e testato su cluster esistente (2026-10-12): tigerastatus
   apiserver/calico/ippools/tiers tutti Available, `kubectl get tiers` OK, API
   `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`). Da verificare su
