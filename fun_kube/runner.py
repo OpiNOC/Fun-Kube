@@ -426,18 +426,22 @@ def _resolve_k8s_version(k8s_version: str) -> str:
 def _write_inventory(cluster: ClusterConfig) -> Path:
     lines = []
 
+    def os_host(n) -> str:
+        # Hostname di sistema con maiuscole: l'inventario usa il nome del nodo (minuscolo)
+        return f" os_hostname={n.os_hostname}" if n.os_hostname and n.os_hostname != n.hostname else ""
+
     lines.append("[control_plane]")
     for n in cluster.control_planes:
         # node_ip: IP del nodo dal .env, passato esplicitamente a kubelet/kubeadm/Calico.
         # Senza, l'auto-detect può scegliere il VIP keepalived (aggiunto all'interfaccia
         # prima del kubeadm init) come IP del nodo.
         if cluster.local_node:
-            lines.append(f"{n.hostname} ansible_connection=local node_ip={n.ip}")
+            lines.append(f"{n.hostname} ansible_connection=local node_ip={n.ip}{os_host(n)}")
         else:
             lines.append(
                 f"{n.hostname} ansible_host={n.ip} node_ip={n.ip} "
                 f"ansible_user={cluster.ssh_user} "
-                f"ansible_ssh_private_key_file={cluster.ssh_key_path}"
+                f"ansible_ssh_private_key_file={cluster.ssh_key_path}{os_host(n)}"
             )
 
     if cluster.workers:
@@ -446,7 +450,7 @@ def _write_inventory(cluster: ClusterConfig) -> Path:
             lines.append(
                 f"{n.hostname} ansible_host={n.ip} node_ip={n.ip} "
                 f"ansible_user={cluster.ssh_user} "
-                f"ansible_ssh_private_key_file={cluster.ssh_key_path}"
+                f"ansible_ssh_private_key_file={cluster.ssh_key_path}{os_host(n)}"
             )
 
     lines += ["", "[all:vars]"]

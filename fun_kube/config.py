@@ -23,7 +23,8 @@ class ConfigError(Exception):
 class NodeConfig:
     ip: str
     role: Literal["control-plane", "worker"]
-    hostname: str
+    hostname: str              # nome del nodo Kubernetes = NODE_x_HOSTNAME in minuscolo
+    os_hostname: str = ""      # hostname di sistema esattamente come nel .env (può avere maiuscole)
 
 
 @dataclass
@@ -322,7 +323,10 @@ def _parse_nodes(env: dict) -> List[NodeConfig]:
                 f"NODE_{i}_HOSTNAME non definito (NODE_{i}_IP={ip}).\n"
                 f"  Ogni nodo deve avere un hostname univoco."
             )
-        nodes.append(NodeConfig(ip=ip, role=role, hostname=hostname))
+        # kubelet/kubeadm registrano il nodo con l'hostname in minuscolo (CP1 → nodo cp1):
+        # tutti i confronti con il cluster usano quel nome. L'hostname di sistema resta
+        # come scritto (cluster creati con maiuscole prima della validazione del wizard).
+        nodes.append(NodeConfig(ip=ip, role=role, hostname=hostname.lower(), os_hostname=hostname))
         i += 1
     if not nodes:
         raise ConfigError(

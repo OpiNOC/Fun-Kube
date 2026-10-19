@@ -17,6 +17,10 @@
 - `up`, `upgrade`, `reset`, `diagnose` e il wizard si fermano subito se non eseguiti come root
   (prima `up` falliva a metà, dopo aver già modificato i nodi; il wizard non vedeva i cluster
   esistenti). Indicano come rilanciare con sudo.
+- **Nomi con maiuscole** (cluster creati prima della validazione del wizard): Kubernetes registra i
+  nodi con l'hostname in minuscolo (`CP1` → nodo `cp1`) e Fun-Kube ora confronta e usa quel nome
+  (upgrade, drain, preflight, reset, diagnose); l'hostname di sistema dei nodi resta come scritto
+  nel `.env`. Il wizard accetta le maiuscole nel nome del cluster e negli hostname.
 - Wizard: il dry-run (di `up` e di `upgrade`) gira dentro il wizard; al termine si torna a
   modificare, si esegue per davvero o si esce.
 

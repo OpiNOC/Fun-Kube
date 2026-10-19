@@ -77,9 +77,10 @@
     - _mtu_probe.stdout.startswith('mtu_change')
     - ansible_default_ipv4.type | default('') != 'ether' or '.' in ansible_default_ipv4.interface
 
+# os_hostname: hostname del .env con maiuscole (l'inventario usa il nome del nodo in minuscolo)
 - name: Set unique hostname
   ansible.builtin.hostname:
-    name: "{{ inventory_hostname }}"
+    name: "{{ os_hostname | default(inventory_hostname) }}"
   become: true
 
 - name: Check if swap is active

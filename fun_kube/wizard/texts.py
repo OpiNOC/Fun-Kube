@@ -42,7 +42,7 @@ TOPOLOGY_HELP = {
 
 # key: (label, hint shown under the field, help shown in the bottom panel when focused, advanced)
 FIELDS = {
-    "CLUSTER_NAME": ("Cluster name", "e.g. prod-k8s-01 — lowercase, digits and '-'",
+    "CLUSTER_NAME": ("Cluster name", "e.g. prod-k8s-01 — letters, digits and '-' (lowercase recommended)",
                      "Unique on this machine. Used for the kubeconfig (/root/.kube/<name>) and the "
                      "maintenance file. Cannot be changed after the cluster is created.", False),
     "K8S_VERSION": ("Kubernetes version", f"Tested: {versions.K8S_VERSION}",

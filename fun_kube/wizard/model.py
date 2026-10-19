@@ -312,7 +312,7 @@ class WizardState:
         """`upgrade` needs the .env nodes to match the cluster nodes exactly."""
         if not self.live:
             return ""
-        env = {n.hostname.strip() for n in self.cps + self.workers}
+        env = {n.hostname.strip().lower() for n in self.cps + self.workers}   # node names are lowercase
         added, removed = sorted(env - set(self.live.nodes)), sorted(set(self.live.nodes) - env)
         if not (added or removed):
             return ""
@@ -570,8 +570,8 @@ def step_errors(state: WizardState) -> Dict[str, List[str]]:
     name = v("CLUSTER_NAME")
     if not name:
         errs["Cluster"].append("Cluster name is required.")
-    elif not re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", name):
-        errs["Cluster"].append("Cluster name: lowercase letters, digits and '-' only (e.g. prod-k8s-01).")
+    elif not re.fullmatch(r"[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?", name):
+        errs["Cluster"].append("Cluster name: letters, digits and '-' only (e.g. prod-k8s-01).")
 
     nodes = state.cps + state.workers
     ips, hosts = [], []
@@ -581,10 +581,10 @@ def step_errors(state: WizardState) -> Dict[str, List[str]]:
             ipaddress.ip_address(n.ip.strip())
         except ValueError:
             errs["Nodes"].append(f"Node {i} ({role}): invalid or missing IP address.")
-        if not re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", n.hostname.strip()):
-            errs["Nodes"].append(f"Node {i} ({role}): hostname required (lowercase, digits, '-').")
+        if not re.fullmatch(r"[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?", n.hostname.strip()):
+            errs["Nodes"].append(f"Node {i} ({role}): hostname required (letters, digits, '-').")
         ips.append(n.ip.strip())
-        hosts.append(n.hostname.strip())
+        hosts.append(n.hostname.strip().lower())
     if len(set(ips)) != len(ips):
         errs["Nodes"].append("Duplicate IP addresses.")
     if len(set(hosts)) != len(hosts):
