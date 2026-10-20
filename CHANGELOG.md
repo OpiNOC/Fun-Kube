@@ -24,6 +24,22 @@
 - Wizard: il dry-run (di `up` e di `upgrade`) gira dentro il wizard; al termine si torna a
   modificare, si esegue per davvero o si esce.
 
+### Correzioni
+
+- `reset` con volumi Longhorn RWX: i pod dei DaemonSet applicativi (es. NPM su `longhorn-rwx`)
+  ignorano il cordon e venivano ricreati subito dopo la cancellazione, rimontando l'NFS; dopo il
+  reset restavano processi in stato D e lo spegnimento del nodo richiedeva ~8 minuti. Ora i
+  DaemonSet applicativi vengono eliminati prima dei pod, e l'attesa prima di `kubeadm reset`
+  aspetta anche che spariscano i client NFS del kernel (non solo i mount visibili).
+- `reset`: logout delle sessioni iSCSI di Longhorn prima di fermare `iscsid` e rimozione di
+  `/var/lib/longhorn` e `/dev/longhorn`. Le sessioni sopravvivevano a `kubeadm reset`.
+- Longhorn: i dischi Longhorn sono esclusi da multipathd (`/etc/multipath/conf.d/longhorn.conf`).
+  Tutti i volumi hanno lo stesso WWID: multipathd accoppiava dischi diversi come percorsi dello
+  stesso disco, `mkfs` falliva ("apparently in use") e i pod con volumi non partivano mai.
+- Monitoring: le NetworkPolicy di Longhorn 1.12 bloccavano lo scraping di `longhorn-manager` da
+  parte di Prometheus (TargetDown); aggiunta una NetworkPolicy che apre solo la porta delle
+  metriche a Prometheus.
+
 ## 1.0.0 — 2026-10-13
 
 Prima versione stabile. Rispetto al codice precedente (commit `b31232b`): versioni aggiornate e

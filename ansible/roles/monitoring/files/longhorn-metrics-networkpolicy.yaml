@@ -1,0 +1,26 @@
+# Longhorn (>= 1.12) installa NetworkPolicy che ammettono verso longhorn-manager solo i pod
+# di Longhorn: Prometheus non riusciva a leggere le metriche (TargetDown su longhorn-backend).
+# Le NetworkPolicy si sommano: questa apre solo la porta delle metriche a Prometheus
+# nel namespace monitoring.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: longhorn-manager-metrics
+  namespace: longhorn-system
+spec:
+  podSelector:
+    matchLabels:
+      app: longhorn-manager
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9500

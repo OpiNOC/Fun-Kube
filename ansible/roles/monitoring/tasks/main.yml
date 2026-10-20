@@ -144,7 +144,10 @@
       changed_when: true
 
     - name: Apply Longhorn ServiceMonitor
-      ansible.builtin.command: kubectl apply -f {{ role_path }}/files/longhorn-servicemonitor.yaml
+      ansible.builtin.command: kubectl apply -f {{ role_path }}/files/{{ item }}
+      loop:
+        - longhorn-servicemonitor.yaml
+        - longhorn-metrics-networkpolicy.yaml
       register: _mon_lh_sm
       changed_when: "'unchanged' not in _mon_lh_sm.stdout"
       when: longhorn_enabled | default(false) | bool

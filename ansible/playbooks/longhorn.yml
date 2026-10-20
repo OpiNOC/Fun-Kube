@@ -25,6 +25,33 @@
         state: started
       when: longhorn_enabled | default(false) | bool
 
+    # Tutti i volumi Longhorn hanno lo stesso WWID: multipathd scambierebbe due volumi
+    # per due percorsi dello stesso disco e terrebbe occupato il device (mkfs: "apparently in use").
+    - name: Create multipath conf.d
+      ansible.builtin.file:
+        path: /etc/multipath/conf.d
+        state: directory
+        mode: "0755"
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Keep multipathd away from Longhorn devices
+      ansible.builtin.copy:
+        dest: /etc/multipath/conf.d/longhorn.conf
+        content: |
+          blacklist {
+              device {
+                  vendor "IET"
+                  product "VIRTUAL-DISK"
+              }
+          }
+        mode: "0644"
+      register: _lh_multipath
+      when: longhorn_enabled | default(false) | bool
+
+    - name: Reload multipathd
+      ansible.builtin.shell: systemctl try-reload-or-restart multipathd && multipath -F || true
+      when: _lh_multipath is changed
+
 
 - name: Deploy Longhorn
   hosts: control_plane[0]

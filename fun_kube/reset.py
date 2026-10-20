@@ -3,8 +3,8 @@ Reset del cluster — comando `fun-kube reset`.
 
 Fasi:
   1. arresto pulito dei workload (se il cluster risponde): cordon di tutti i nodi,
-     cancellazione dei pod dei namespace applicativi e attesa che sui nodi non restino
-     mount NFS/Longhorn. I client NFS (volumi RWX) si staccano PRIMA che spariscano gli
+     cancellazione dei DaemonSet e dei pod dei namespace applicativi e attesa che sui nodi
+     non restino mount NFS/Longhorn né client NFS del kernel. I client NFS (volumi RWX) si staccano PRIMA che spariscano gli
      share-manager: altrimenti restano processi in stato D per sempre (osservato nel lab:
      load ~3 su due worker dopo un reset, "nfs: server ... not responding").
   2. kubeadm reset + pulizia su ogni nodo (umount normale prima del lazy)
@@ -36,15 +36,24 @@ _NODE_RESET_SCRIPT = (
     # Stop kubelet first to release CSI/iSCSI/NFS mounts (e.g. Longhorn volumes)
     # that would otherwise cause `kubeadm reset` to hang indefinitely.
     "sudo systemctl stop kubelet 2>/dev/null || true; "
-    "sudo systemctl stop iscsid 2>/dev/null || true; "
     # umount normale (forzato) prima, lazy solo come ultima risorsa: il lazy nasconde
     # il mount ma lascia appesi per sempre i processi che lo stavano usando.
     "for m in $(grep -E 'kubelet|longhorn|csi' /proc/mounts 2>/dev/null | awk '{print $2}' | sort -r); do "
     "  sudo timeout 20 umount -f \"$m\" 2>/dev/null || sudo umount -f -l \"$m\" 2>/dev/null || true; "
     "done; "
+    # Le sessioni iSCSI di Longhorn sopravvivono a kubeadm reset: i dischi vecchi restano
+    # collegati e, siccome tutti i volumi Longhorn hanno lo stesso WWID, multipathd li
+    # accoppia a quelli nuovi del cluster successivo ("device in use", mkfs fallisce).
+    "sudo multipath -F 2>/dev/null || true; "
+    "for t in $(sudo iscsiadm -m session 2>/dev/null | grep -o 'iqn\\.2019-10\\.io\\.longhorn:[^ ]*'); do "
+    "  sudo timeout 30 iscsiadm -m node -T \"$t\" --logout || true; "
+    "  sudo iscsiadm -m node -T \"$t\" -o delete 2>/dev/null || true; "
+    "done; "
+    "sudo systemctl stop iscsid 2>/dev/null || true; "
     "sudo kubeadm reset -f 2>/dev/null || true; "
+    # /var/lib/longhorn e /dev/longhorn: repliche dei volumi del cluster distrutto, mai riusate
     "sudo rm -rf /etc/kubernetes /var/lib/etcd /var/lib/kubelet "
-    "         /etc/cni/net.d /opt/cni/bin /root/.kube; "
+    "         /etc/cni/net.d /opt/cni/bin /root/.kube /var/lib/longhorn /dev/longhorn; "
     "sudo iptables -F && sudo iptables -t nat -F && "
     "sudo iptables -t mangle -F && sudo iptables -X 2>/dev/null || true; "
     "sudo ip link delete cni0 2>/dev/null || true; "
@@ -54,8 +63,13 @@ _NODE_RESET_SCRIPT = (
 
 # Solo mount di kubelet (volumi dei pod): NFS dei volumi RWX e dischi Longhorn.
 # Mount NFS dell'host non legati al cluster non vengono contati.
-_COUNT_VOLUME_MOUNTS = ("grep ' /var/lib/kubelet/' /proc/mounts "
-                        "| grep -cE ' nfs4? |driver.longhorn.io' || true")
+# Più i client NFS del kernel: possono sopravvivere ai mount visibili (riferimenti da altri
+# mount namespace, es. il plugin CSI di Longhorn) e, se lo share-manager sparisce prima,
+# il loro state manager resta in stato D per sempre (e rallenta lo spegnimento di minuti).
+_COUNT_VOLUME_MOUNTS = ("m=$(grep ' /var/lib/kubelet/' /proc/mounts "
+                        "| grep -cE ' nfs4? |driver.longhorn.io'); "
+                        "c=$(tail -n +2 /proc/fs/nfsfs/servers 2>/dev/null | wc -l); "
+                        "echo $((m + c))")
 _LIST_D_STATE = "ps -eo state,pid,etime,comm --no-headers | awk '$1 ~ /D/'"
 
 
@@ -101,7 +115,11 @@ def stop_workloads(cluster: ClusterConfig) -> None:
     if app_ns:
         console.print(f"  [cyan]▶[/]  arresto workload applicativi ({', '.join(app_ns)})")
         for ns in app_ns:
-            # i controller ricreano i pod, ma restano Pending (nodi in cordon)
+            # i pod dei DaemonSet ignorano il cordon e verrebbero ricreati subito, rimontando
+            # i volumi (es. NPM su longhorn-rwx): si eliminano i DaemonSet stessi
+            _kubectl(kubeconfig, "delete", "daemonsets", "--all", "-n", ns, "--cascade=foreground",
+                     "--wait=true", "--timeout=180s", timeout=200)
+            # gli altri controller ricreano i pod, ma restano Pending (nodi in cordon)
             _kubectl(kubeconfig, "delete", "pods", "--all", "-n", ns,
                      "--wait=true", "--timeout=180s", timeout=200)
 
