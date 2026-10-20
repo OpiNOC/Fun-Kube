@@ -685,5 +685,7 @@ spazio prenotabile per nodo; ridurre `PROM_STORAGE` / `LOKI_STORAGE` o ingrandir
 ./fun-kube up
 ```
 
-`reset` arresta prima i workload (i volumi Longhorn/NFS si staccano in modo pulito) e segnala i
-nodi con processi bloccati; `--reboot` riavvia i nodi e garantisce uno stato pulito.
+`reset` arresta prima i workload (DaemonSet e pod dei namespace applicativi, così i volumi
+Longhorn/NFS si staccano in modo pulito), chiude le sessioni iSCSI di Longhorn, rimuove i dati
+del cluster dai nodi (repliche Longhorn comprese) e segnala i nodi con processi bloccati;
+`--reboot` riavvia i nodi e garantisce uno stato pulito.

@@ -509,17 +509,54 @@ creazione e modifica; opzioni avanzate a parte; interfaccia in inglese.
   clusterip; screenshot di ogni passo
 - i messaggi di `config.py` (validazione finale) restano in italiano
 
-## Prossimi passi / idee (aggiornato 2026-10-13)
+### Reset con volumi Longhorn RWX, multipath, metriche Longhorn — 2026-10-20 — DA TESTARE QUI
 
-- **Test residui**: reset con il nuovo arresto pulito dei workload (verifica nessun processo
-  in stato D), LOCAL_NODE (bootstrap = nodo)
+Portato dal modulo funkube di madmin, dove è stato trovato e verificato nel lab (HA 3 CP con
+NPM su `longhorn-rwx`, Longhorn RWX e monitoring). Commit `4e132a8`. In Fun-Kube è stato fatto
+solo il controllo statico (import, sintassi degli script shell, YAML): il codice Python di
+`reset.py` non è ancora stato eseguito.
+
+- **DaemonSet e cordon**: i pod dei DaemonSet ignorano il cordon. `kubectl delete pods` li
+  faceva ricreare subito e i nuovi pod NPM rimontavano l'NFS; dopo `kubeadm reset` restava un
+  nginx in stato D e lo spegnimento del nodo richiedeva ~8 minuti. Ora `stop_workloads`
+  elimina prima i DaemonSet dei namespace applicativi (`--cascade=foreground`), poi i pod.
+  In madmin il reset è passato da 6m44s (attesa smontaggio scaduta su tutti i nodi) a 1m38s.
+- **Client NFS del kernel**: un client può sopravvivere ai mount visibili (riferimenti da altri
+  mount namespace, es. il plugin CSI di Longhorn). Se lo share-manager muore prima, il thread
+  `<ip>-manager` resta in stato D e rallenta lo spegnimento di ~8 minuti. L'attesa prima di
+  `kubeadm reset` conta anche le righe di `/proc/fs/nfsfs/servers`. Caso intermittente (1 nodo
+  su 3 in un giro): il giro finale in madmin è stato pulito, ma non lo esclude al 100%.
+- **iSCSI e multipath**: le sessioni iSCSI di Longhorn sopravvivevano a `kubeadm reset`; siccome
+  tutti i volumi Longhorn hanno lo stesso WWID, al provisioning successivo multipathd accoppiava
+  disco vecchio e nuovo, `mkfs` falliva ("apparently in use") e NPM/MariaDB non partivano mai.
+  Ora il reset fa logout delle sessioni `iqn.2019-10.io.longhorn:*` prima di fermare `iscsid` e
+  rimuove `/var/lib/longhorn` e `/dev/longhorn`; `longhorn.yml` scrive
+  `/etc/multipath/conf.d/longhorn.conf` (blacklist vendor `IET` / product `VIRTUAL-DISK`).
+  Le sessioni con target già sparito non si chiudono: serve il riavvio del nodo.
+- **Metriche Longhorn**: le NetworkPolicy di Longhorn 1.12 ammettono verso `longhorn-manager`
+  solo i pod di Longhorn → TargetDown su `longhorn-backend`. Nuova
+  `roles/monitoring/files/longhorn-metrics-networkpolicy.yaml` che apre solo la porta 9500 a
+  Prometheus.
+- Risultato in madmin (giro finale): provisioning 17m21s, reset 2m48s, dopo il reset su tutti i
+  nodi 0 mount NFS, 0 client NFS, 0 sessioni iSCSI, nessun device multipath, nessun processo in D.
+
+**Test da fare in Fun-Kube**: `up` HA con `LONGHORN_RWX=true`, NPM e monitoring, poi `reset` (senza
+`--reboot`) e verificare sui nodi: attesa smontaggio chiusa subito, `/proc/fs/nfsfs/servers`
+vuoto, `iscsiadm -m session` vuoto, nessun processo in stato D; poi un nuovo `up` sugli stessi
+nodi (nessun errore di mkfs).
+
+## Prossimi passi / idee (aggiornato 2026-10-20)
+
+- **Test residui**: reset con le correzioni del 2026-10-20 (vedi sopra, "Test da fare in
+  Fun-Kube"), LOCAL_NODE (bootstrap = nodo)
 - **Calico APIServer**: aggiunto e testato su cluster esistente (2026-10-12): tigerastatus
   apiserver/calico/ippools/tiers tutti Available, `kubectl get tiers` OK, API
   `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`); verificato anche su
   installazione da zero (Test 13)
 - **Load worker2/worker3 ~3**: causa trovata (processi bloccati su NFS dopo un reset) → nuovo
-  `reset` con arresto pulito dei workload e `--reboot`. DA TESTARE: reset del cluster HA con
-  workload su PVC RWX, poi verificare che nessun nodo abbia processi in stato D
+  `reset` con arresto pulito dei workload e `--reboot`; il 2026-10-20 trovate e corrette in
+  madmin altre due cause (DaemonSet ricreati nonostante il cordon, client NFS del kernel
+  sopravvissuti ai mount). DA TESTARE in Fun-Kube (vedi sopra)
 - **Monitoring**: completare i test 22-25 (sopra); poi eventuali ServiceMonitor per MetalLB,
   Traefik, cert-manager
 - **Altri nuovi componenti**: da definire (il monitoring era il primo)
