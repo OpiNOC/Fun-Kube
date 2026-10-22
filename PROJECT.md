@@ -545,10 +545,32 @@ solo il controllo statico (import, sintassi degli script shell, YAML): il codice
 vuoto, `iscsiadm -m session` vuoto, nessun processo in stato D; poi un nuovo `up` sugli stessi
 nodi (nessun errore di mkfs).
 
-## Prossimi passi / idee (aggiornato 2026-10-20)
+### Timer di rinnovo certificati — 2026-10-22 — DA TESTARE QUI
 
-- **Test residui**: reset con le correzioni del 2026-10-20 (vedi sopra, "Test da fare in
-  Fun-Kube"), LOCAL_NODE (bootstrap = nodo)
+Trovato nel modulo funkube di madmin aggiungendo control-plane a un cluster attivo (commit madmin
+`0270df6`). `Requires=k8s-cert-renew.service` nel timer faceva partire il servizio **ogni volta che
+partiva il timer**: al deploy di `cert-renewal.yml` e a ogni boot dei nodi. È questa la causa radice
+del bug del Test 1b, attribuito allora a `Persistent=true`. Ogni esecuzione rinnova i certificati e
+sposta i manifest di apiserver, controller-manager e scheduler fuori da `/etc/kubernetes/manifests`
+per 20 secondi: un nodo che si spegne in quella finestra li perdeva, perché finivano in `/tmp`.
+Nel lab madmin i journal dei CP mostravano un'esecuzione a ogni boot.
+
+- Tolto `Requires=` dal timer: il timer attiva il servizio per nome, solo alla scadenza mensile.
+- I manifest attendono in `/etc/kubernetes/manifests-renew-backup` (persistente), un `trap EXIT` li
+  rimette a posto anche se lo script fallisce a metà, e l'esecuzione successiva recupera quelli
+  lasciati da un'esecuzione interrotta.
+- Verifica in madmin: dopo il deploy del timer nuovo su 5 CP nessuna esecuzione del servizio,
+  `systemctl show k8s-cert-renew.timer -p Requires` = solo `sysinit.target`. In Fun-Kube solo il
+  test dello script con percorsi finti (uscita 1 con errore a metà e manifest ripristinati).
+
+**Test da fare in Fun-Kube**: `up`, poi su ogni CP `journalctl -u k8s-cert-renew.service` vuoto e
+`systemctl list-timers k8s-cert-renew.timer` con la prossima esecuzione il mese successivo; riavviare
+un CP e verificare che il servizio non parta al boot.
+
+## Prossimi passi / idee (aggiornato 2026-10-22)
+
+- **Test residui**: reset con le correzioni del 2026-10-20 e timer di rinnovo certificati del
+  2026-10-22 (vedi sopra, "Test da fare in Fun-Kube"), LOCAL_NODE (bootstrap = nodo)
 - **Calico APIServer**: aggiunto e testato su cluster esistente (2026-10-12): tigerastatus
   apiserver/calico/ippools/tiers tutti Available, `kubectl get tiers` OK, API
   `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`); verificato anche su

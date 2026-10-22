@@ -4,15 +4,25 @@
 set -euo pipefail
 
 MANIFESTS_DIR=/etc/kubernetes/manifests
-BACKUP_DIR=/tmp/k8s-manifests-backup-$(date +%Y%m%d%H%M%S)
+# Non in /tmp: se il nodo si ferma mentre i manifest sono spostati, al boot
+# successivo devono esserci ancora (ripristinati qui sotto, o a mano)
+BACKUP_DIR=/etc/kubernetes/manifests-renew-backup
 LOG_PREFIX="[k8s-cert-renew]"
 
 echo "$LOG_PREFIX Inizio rinnovo certificati: $(date)"
+
+# Residui di un'esecuzione interrotta: prima rimette a posto quei manifest
+if compgen -G "$BACKUP_DIR/*.yaml" >/dev/null; then
+  echo "$LOG_PREFIX Ripristino dei manifest lasciati in $BACKUP_DIR da un'esecuzione interrotta"
+  mv "$BACKUP_DIR"/*.yaml "$MANIFESTS_DIR/"
+fi
 
 kubeadm certs renew all
 echo "$LOG_PREFIX Certificati rinnovati"
 
 mkdir -p "$BACKUP_DIR"
+# Qualunque cosa succeda da qui in poi, i manifest tornano nella directory di kubelet
+trap 'if compgen -G "$BACKUP_DIR/*.yaml" >/dev/null; then mv "$BACKUP_DIR"/*.yaml "$MANIFESTS_DIR/"; fi' EXIT
 echo "$LOG_PREFIX Spostamento manifest in $BACKUP_DIR"
 mv "$MANIFESTS_DIR/kube-apiserver.yaml" \
    "$MANIFESTS_DIR/kube-controller-manager.yaml" \

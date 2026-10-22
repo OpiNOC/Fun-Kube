@@ -26,6 +26,12 @@
 
 ### Correzioni
 
+- Rinnovo certificati: il timer `k8s-cert-renew.timer` faceva partire il rinnovo ogni volta che
+  partiva lui stesso (`Requires=` sul servizio), cioè al provisioning e a ogni boot dei nodi;
+  ogni rinnovo ferma per ~50 secondi apiserver, controller-manager e scheduler. Ora il rinnovo
+  parte solo una volta al mese. I manifest spostati durante il rinnovo restano in
+  `/etc/kubernetes/manifests-renew-backup` invece che in `/tmp` e vengono rimessi a posto anche
+  se il rinnovo si interrompe: prima un nodo spento in quella finestra perdeva il control plane.
 - `reset` con volumi Longhorn RWX: i pod dei DaemonSet applicativi (es. NPM su `longhorn-rwx`)
   ignorano il cordon e venivano ricreati subito dopo la cancellazione, rimontando l'NFS; dopo il
   reset restavano processi in stato D e lo spegnimento del nodo richiedeva ~8 minuti. Ora i

@@ -1,6 +1,8 @@
 [Unit]
 Description=Rinnovo mensile certificati Kubernetes
-Requires=k8s-cert-renew.service
+# Niente Requires= sul servizio: avvierebbe il rinnovo (e il restart del control
+# plane) a ogni avvio del timer, cioè al deploy e a ogni boot. Il timer attiva
+# k8s-cert-renew.service per nome.
 
 [Timer]
 OnCalendar=monthly
