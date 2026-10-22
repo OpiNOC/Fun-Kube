@@ -568,9 +568,11 @@ già nel cluster si ferma e indica di usare `upgrade`.
 
 ## Certificati — rinnovo automatico
 
-Fun-Kube installa un systemd timer su ogni nodo control-plane che rinnova i certificati ogni mese con `kubeadm certs renew all` e riavvia automaticamente i componenti del control-plane.
+Fun-Kube installa un systemd timer su ogni nodo control-plane che rinnova i certificati ogni mese con `kubeadm certs renew all` e riavvia automaticamente i componenti del control-plane (~1 minuto di API server fermo su quel nodo). Il timer scatta solo alla scadenza mensile: non al provisioning né al boot dei nodi.
 
 In modalità HA i nodi rinnovano in finestre diverse (fino a 1 ora di spread) per evitare restart simultanei.
+
+Rinnovo manuale (un CP alla volta): `sudo systemctl start k8s-cert-renew.service`. Durante il riavvio i manifest del control-plane stanno in `/etc/kubernetes/manifests-renew-backup`: se il rinnovo si interrompe (es. nodo spento), vengono rimessi a posto all'uscita dello script o dal rinnovo successivo.
 
 Il kubeconfig primario (ServiceAccount token) **non è soggetto alla scadenza annuale** dei certificati kubeadm. Solo il kubeconfig di emergenza (`-admin`) richiede un aggiornamento manuale dopo ogni rinnovo.
 
@@ -687,5 +689,6 @@ spazio prenotabile per nodo; ridurre `PROM_STORAGE` / `LOKI_STORAGE` o ingrandir
 
 `reset` arresta prima i workload (DaemonSet e pod dei namespace applicativi, così i volumi
 Longhorn/NFS si staccano in modo pulito), chiude le sessioni iSCSI di Longhorn, rimuove i dati
-del cluster dai nodi (repliche Longhorn comprese) e segnala i nodi con processi bloccati;
+del cluster dai nodi (repliche Longhorn comprese) e segnala i nodi con processi rimasti bloccati
+in stato D;
 `--reboot` riavvia i nodi e garantisce uno stato pulito.
