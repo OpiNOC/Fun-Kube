@@ -509,7 +509,7 @@ creazione e modifica; opzioni avanzate a parte; interfaccia in inglese.
   clusterip; screenshot di ogni passo
 - i messaggi di `config.py` (validazione finale) restano in italiano
 
-### Reset con volumi Longhorn RWX, multipath, metriche Longhorn — 2026-10-20 — DA TESTARE QUI
+### Reset con volumi Longhorn RWX, multipath, metriche Longhorn — 2026-10-20 — ✓ TESTATO (2026-10-22)
 
 Portato dal modulo funkube di madmin, dove è stato trovato e verificato nel lab (HA 3 CP con
 NPM su `longhorn-rwx`, Longhorn RWX e monitoring). Commit `4e132a8`. In Fun-Kube è stato fatto
@@ -540,12 +540,18 @@ solo il controllo statico (import, sintassi degli script shell, YAML): il codice
 - Risultato in madmin (giro finale): provisioning 17m21s, reset 2m48s, dopo il reset su tutti i
   nodi 0 mount NFS, 0 client NFS, 0 sessioni iSCSI, nessun device multipath, nessun processo in D.
 
-**Test da fare in Fun-Kube**: `up` HA con `LONGHORN_RWX=true`, NPM e monitoring, poi `reset` (senza
-`--reboot`) e verificare sui nodi: attesa smontaggio chiusa subito, `/proc/fs/nfsfs/servers`
-vuoto, `iscsiadm -m session` vuoto, nessun processo in stato D; poi un nuovo `up` sugli stessi
-nodi (nessun errore di mkfs).
+**Test in Fun-Kube (2026-10-22)**, bootstrap `mr-kube-test-boot` (192.168.115.19), cluster
+`mycluster` HA 3 CP + 3 worker, VIP .20, `LONGHORN_RWX=true`, NPM, DN-essence, monitoring:
+- `reset -y` (senza `--reboot`): **118 s**, "volumi smontati" subito; sui 6 nodi 0 mount NFS,
+  0 client NFS, 0 sessioni iSCSI, nessun device multipath, `/var/lib/longhorn` rimosso.
+- Un solo avviso: worker3 con un `kworker/u10:2+events_unbound` in stato D, sparito pochi
+  secondi dopo (writeback del kernel, `inode_switch_wbs`, non NFS). Falso positivo del controllo:
+  ora `check_stuck_processes` legge due volte a 5 s di distanza e segnala solo i processi
+  rimasti in D (stessa modifica nel `reset.yml` di madmin).
+- `up -y` sugli stessi nodi: **870 s**, nessun "apparently in use", NPM (3 pod) e MariaDB Running,
+  6 volumi Longhorn healthy, 6 PVC Bound.
 
-### Timer di rinnovo certificati — 2026-10-22 — DA TESTARE QUI
+### Timer di rinnovo certificati — 2026-10-22 — ✓ TESTATO
 
 Trovato nel modulo funkube di madmin aggiungendo control-plane a un cluster attivo (commit madmin
 `0270df6`). `Requires=k8s-cert-renew.service` nel timer faceva partire il servizio **ogni volta che
@@ -563,14 +569,19 @@ Nel lab madmin i journal dei CP mostravano un'esecuzione a ogni boot.
   `systemctl show k8s-cert-renew.timer -p Requires` = solo `sysinit.target`. In Fun-Kube solo il
   test dello script con percorsi finti (uscita 1 con errore a metà e manifest ripristinati).
 
-**Test da fare in Fun-Kube**: `up`, poi su ogni CP `journalctl -u k8s-cert-renew.service` vuoto e
-`systemctl list-timers k8s-cert-renew.timer` con la prossima esecuzione il mese successivo; riavviare
-un CP e verificare che il servizio non parta al boot.
+Prima della correzione, su `mycluster` (provisioning del 2026-10-13): il rinnovo era partito alle
+11:16:13 **nello stesso secondo sui 3 CP**, quindi i 3 API server erano giù insieme per ~50 s
+(il `RandomizedDelaySec` vale solo per lo scatto programmato, non per l'avvio via `Requires=`).
+
+**Test in Fun-Kube (2026-10-22)**, dopo `reset` + `up` con il timer nuovo: su cp1-3 nessuna
+esecuzione del servizio dall'inizio di `up`, `Requires` = solo `sysinit.target`, prossima
+esecuzione il 1° novembre (orari diversi per CP), cartella di backup vuota. Riavvio di cp3: al
+boot nessuna esecuzione, timer attivo, componenti del control plane Running dopo ~25 s.
 
 ## Prossimi passi / idee (aggiornato 2026-10-22)
 
-- **Test residui**: reset con le correzioni del 2026-10-20 e timer di rinnovo certificati del
-  2026-10-22 (vedi sopra, "Test da fare in Fun-Kube"), LOCAL_NODE (bootstrap = nodo)
+- **Test residui**: LOCAL_NODE (bootstrap = nodo). Reset del 2026-10-20 e timer di rinnovo
+  certificati testati il 2026-10-22
 - **Calico APIServer**: aggiunto e testato su cluster esistente (2026-10-12): tigerastatus
   apiserver/calico/ippools/tiers tutti Available, `kubectl get tiers` OK, API
   `projectcalico.org/v3` disponibili (i pod stanno in `calico-system`); verificato anche su
@@ -578,7 +589,7 @@ un CP e verificare che il servizio non parta al boot.
 - **Load worker2/worker3 ~3**: causa trovata (processi bloccati su NFS dopo un reset) → nuovo
   `reset` con arresto pulito dei workload e `--reboot`; il 2026-10-20 trovate e corrette in
   madmin altre due cause (DaemonSet ricreati nonostante il cordon, client NFS del kernel
-  sopravvissuti ai mount). DA TESTARE in Fun-Kube (vedi sopra)
+  sopravvissuti ai mount). Testato in Fun-Kube il 2026-10-22 (vedi sopra)
 - **Monitoring**: completare i test 22-25 (sopra); poi eventuali ServiceMonitor per MetalLB,
   Traefik, cert-manager
 - **Altri nuovi componenti**: da definire (il monitoring era il primo)

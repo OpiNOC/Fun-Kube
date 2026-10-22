@@ -70,7 +70,13 @@ _COUNT_VOLUME_MOUNTS = ("m=$(grep ' /var/lib/kubelet/' /proc/mounts "
                         "| grep -cE ' nfs4? |driver.longhorn.io'); "
                         "c=$(tail -n +2 /proc/fs/nfsfs/servers 2>/dev/null | wc -l); "
                         "echo $((m + c))")
-_LIST_D_STATE = "ps -eo state,pid,etime,comm --no-headers | awk '$1 ~ /D/'"
+# Processi in stato D in due letture a 5 s di distanza: un kworker resta in D per un
+# attimo anche durante la normale scrittura su disco (falso positivo osservato il 2026-10-22).
+_LIST_D_STATE = (
+    "d() { ps -eo state=,pid= | awk '$1 ~ /D/ {print $2}'; }; "
+    "a=$(d); [ -z \"$a\" ] && exit 0; sleep 5; "
+    "for p in $(d); do echo \"$a\" | grep -qx \"$p\" && ps -o state=,pid=,etime=,comm= -p \"$p\"; done; true"
+)
 
 
 def _node_cmd(cluster: ClusterConfig, node: NodeConfig, cmd: str, timeout: int = 120,

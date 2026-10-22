@@ -32,6 +32,9 @@
   parte solo una volta al mese. I manifest spostati durante il rinnovo restano in
   `/etc/kubernetes/manifests-renew-backup` invece che in `/tmp` e vengono rimessi a posto anche
   se il rinnovo si interrompe: prima un nodo spento in quella finestra perdeva il control plane.
+- `reset`: il controllo dei processi bloccati segnalava anche processi in stato D solo per un
+  attimo (un kworker durante la normale scrittura su disco). Ora legge due volte a 5 secondi di
+  distanza e segnala solo quelli rimasti bloccati.
 - `reset` con volumi Longhorn RWX: i pod dei DaemonSet applicativi (es. NPM su `longhorn-rwx`)
   ignorano il cordon e venivano ricreati subito dopo la cancellazione, rimontando l'NFS; dopo il
   reset restavano processi in stato D e lo spegnimento del nodo richiedeva ~8 minuti. Ora i
