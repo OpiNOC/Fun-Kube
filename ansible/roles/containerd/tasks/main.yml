@@ -95,11 +95,24 @@
     mode: '0755'
   become: true
 
-# Genera il config atteso (default + SystemdCgroup=true) e lo applica solo se diverso
+# Directory standard per la configurazione per-registry (hosts.toml, CA, mirror):
+# vuota non cambia nulla; chi usa un registry interno ci aggiunge <host>/hosts.toml.
+- name: Ensure /etc/containerd/certs.d exists
+  ansible.builtin.file:
+    path: /etc/containerd/certs.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+# Genera il config atteso (default + SystemdCgroup=true + config_path dei registry)
+# e lo applica solo se diverso
 - name: Generate and apply containerd config (idempotent)
   ansible.builtin.shell: |
     containerd config default > /tmp/_containerd_new.toml
     sed -i 's/^\(\s*\)SystemdCgroup = false/\1SystemdCgroup = true/' /tmp/_containerd_new.toml
+    sed -i "s|^\(\s*\)config_path = ''$|\1config_path = '/etc/containerd/certs.d'|" /tmp/_containerd_new.toml
     if diff -q /tmp/_containerd_new.toml /etc/containerd/config.toml > /dev/null 2>&1; then
       echo "ok"
     else

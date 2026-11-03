@@ -4,6 +4,10 @@
 
 ### Novità
 
+- **containerd: `config_path = /etc/containerd/certs.d`** per i registry (CRI e transfer service),
+  directory creata vuota. Permette di aggiungere registry interni con CA propria o mirror tramite
+  `certs.d/<host>/hosts.toml` senza modificare `config.toml` (che `up` rigenera). Su cluster
+  esistenti il prossimo `up` aggiorna il config e riavvia containerd (i container restano attivi).
 - **`TRAEFIK_TRUSTED_IPS`**: IP/CIDR dei proxy esterni (es. NPM che termina TLS) di cui Traefik
   accetta `X-Forwarded-*` sugli entrypoint web/websecure (`forwardedHeaders.trustedIPs`).
   `0.0.0.0/0` rifiutato. Nel wizard nel passo *Add-ons* (opzioni avanzate).
