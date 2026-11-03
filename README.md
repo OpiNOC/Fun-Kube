@@ -326,7 +326,14 @@ TRAEFIK_HTTPS_NODEPORT=30443
 TRAEFIK_IS_DEFAULT_CLASS=true
 TRAEFIK_DASHBOARD_HOST=           # es. traefik.miodominio.com — vuoto = solo port-forward
 TRAEFIK_ACME_EMAIL=               # es. admin@miodominio.com — vuoto = guida in output/
+TRAEFIK_TRUSTED_IPS=              # es. 192.168.1.5/32 — proxy esterni fidati (vedi sotto)
 ```
+
+**Proxy esterno davanti a Traefik** (es. Nginx Proxy Manager fuori dal cluster che termina TLS e
+inoltra in HTTP): impostare `TRAEFIK_TRUSTED_IPS` con l'IP del proxy. Senza, Traefik sovrascrive
+`X-Forwarded-Proto` con `http` e `X-Forwarded-For` con l'IP del proxy: le applicazioni vedono
+richieste HTTP e perdono l'IP del client. Con `externalTrafficPolicy: Local` (default di Fun-Kube)
+Traefik vede l'IP reale del proxy; se lungo il percorso c'è SNAT, indicare l'IP dopo il NAT.
 
 Traefik viene installato come **DaemonSet** (un pod per nodo worker). Se `TRAEFIK_ACME_EMAIL` è impostato, vengono creati automaticamente i ClusterIssuer `letsencrypt-staging` e `letsencrypt-prod`. Altrimenti la guida per configurarli manualmente viene scritta in `output/traefik-letsencrypt-guide.txt`.
 

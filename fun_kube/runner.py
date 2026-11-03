@@ -1,6 +1,7 @@
 """
 Esecuzione dei playbook Ansible in sequenza.
-Genera l'inventory da ClusterConfig e passa le variabili come --extra-vars.
+Genera l'inventory da ClusterConfig e passa le variabili come --extra-vars @<file 0600>
+(mai sulla riga di comando: contengono password visibili con ps).
 """
 from __future__ import annotations
 
@@ -8,8 +9,11 @@ import datetime
 import json
 import re
 import shutil
+import os
 import subprocess
+import tempfile
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List
 
@@ -511,6 +515,7 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict
         "traefik_is_default_class": cluster.ingress.traefik_is_default_class,
         "traefik_dashboard_host": cluster.ingress.traefik_dashboard_host,
         "traefik_acme_email": cluster.ingress.traefik_acme_email,
+        "traefik_trusted_ips": cluster.ingress.traefik_trusted_ips,
         "npm_namespace": "npm-system",
         "npm_lb_ip": cluster.ingress.npm_lb_ip,
         "npm_http_nodeport": cluster.ingress.npm_http_nodeport,
@@ -567,49 +572,68 @@ def _monitoring_vars(cluster: ClusterConfig) -> dict:
 # Ansible runner
 # ---------------------------------------------------------------------------
 
+@contextmanager
+def _extra_vars_file(extra_vars: dict):
+    """Scrive le extra-vars in un file temporaneo 0600 e restituisce l'argomento '@<path>'.
+    Le password (NPM, VRRP, Grafana) non compaiono così nella riga di comando (ps) né
+    nell'ambiente; il file è rimosso anche in caso di errore o Ctrl+C."""
+    fd, path = tempfile.mkstemp(prefix="fun-kube-vars-", suffix=".json")  # mkstemp: permessi 0600
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(extra_vars, f)
+        yield "@" + path
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
 def _syntax_check_playbooks(playbooks: List[str], inventory: Path, extra_vars: dict) -> None:
     """Verifica la sintassi di tutti i playbook prima di eseguirli."""
     errors = []
-    for pb in playbooks:
-        pb_path = _PLAYBOOK_DIR / pb
-        if not pb_path.exists():
-            errors.append(f"Playbook non trovato: {pb_path}")
-            continue
-        cmd = [
-            "ansible-playbook",
-            "--syntax-check",
-            str(pb_path),
-            "-i", str(inventory),
-            "--extra-vars", json.dumps(extra_vars),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(_ANSIBLE_DIR))
-        if result.returncode != 0:
-            errors.append(f"{pb}:\n{result.stdout}\n{result.stderr}")
+    with _extra_vars_file(extra_vars) as ev:
+        for pb in playbooks:
+            pb_path = _PLAYBOOK_DIR / pb
+            if not pb_path.exists():
+                errors.append(f"Playbook non trovato: {pb_path}")
+                continue
+            cmd = [
+                "ansible-playbook",
+                "--syntax-check",
+                str(pb_path),
+                "-i", str(inventory),
+                "--extra-vars", ev,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(_ANSIBLE_DIR))
+            if result.returncode != 0:
+                errors.append(f"{pb}:\n{result.stdout}\n{result.stderr}")
     if errors:
         raise RunnerError("Syntax check fallito:\n" + "\n".join(errors))
 
 
 def _run_playbook(pb: Path, inventory: Path, extra_vars: dict, debug: bool) -> None:
-    cmd = [
-        "ansible-playbook",
-        str(pb),
-        "-i", str(inventory),
-        "--extra-vars", json.dumps(extra_vars),
-    ]
-    if debug:
-        cmd.append("-vv")
+    with _extra_vars_file(extra_vars) as ev:
+        cmd = [
+            "ansible-playbook",
+            str(pb),
+            "-i", str(inventory),
+            "--extra-vars", ev,
+        ]
+        if debug:
+            cmd.append("-vv")
 
-    # Esegue dalla directory ansible/ così ansible.cfg viene rilevato automaticamente
-    proc = subprocess.Popen(cmd, text=True, cwd=str(_ANSIBLE_DIR))
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        proc.terminate()
+        # Esegue dalla directory ansible/ così ansible.cfg viene rilevato automaticamente
+        proc = subprocess.Popen(cmd, text=True, cwd=str(_ANSIBLE_DIR))
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        raise
+            proc.wait()
+        except KeyboardInterrupt:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            raise
     if proc.returncode != 0:
         raise RunnerError(
             f"Il playbook {pb.name} è terminato con codice {proc.returncode}"

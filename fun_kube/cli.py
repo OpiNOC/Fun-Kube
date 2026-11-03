@@ -989,6 +989,7 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
                 console.print(f"    Ingress service   : {svc_detail}")
                 if ing.traefik_dashboard_host:
                     console.print(f"    Dashboard         : http://{ing.traefik_dashboard_host}/dashboard/")
+                console.print(f"    Proxy fidati      : {', '.join(ing.traefik_trusted_ips) or 'nessuno (X-Forwarded-* ignorati)'}")
                 if ing.traefik_acme_email:
                     console.print(f"    Let's Encrypt     : {ing.traefik_acme_email}")
                 else:

@@ -27,6 +27,11 @@ service:
 ports:
   web:
     port: 8000
+{% if traefik_trusted_ips | default([]) | length > 0 %}
+    forwardedHeaders:
+      trustedIPs: {{ traefik_trusted_ips | to_json }}
+      insecure: false
+{% endif %}
     expose:
       default: true
     exposedPort: 80
@@ -35,6 +40,11 @@ ports:
 {% endif %}
   websecure:
     port: 8443
+{% if traefik_trusted_ips | default([]) | length > 0 %}
+    forwardedHeaders:
+      trustedIPs: {{ traefik_trusted_ips | to_json }}
+      insecure: false
+{% endif %}
     expose:
       default: true
     exposedPort: 443

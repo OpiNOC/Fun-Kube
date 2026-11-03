@@ -4,6 +4,12 @@
 
 ### Novità
 
+- **`TRAEFIK_TRUSTED_IPS`**: IP/CIDR dei proxy esterni (es. NPM che termina TLS) di cui Traefik
+  accetta `X-Forwarded-*` sugli entrypoint web/websecure (`forwardedHeaders.trustedIPs`).
+  `0.0.0.0/0` rifiutato. Nel wizard nel passo *Add-ons* (opzioni avanzate).
+- **Password fuori dalla riga di comando**: le extra-vars di Ansible (password NPM, VRRP, Grafana)
+  passano in un file temporaneo 0600 (`--extra-vars @file`) rimosso a fine playbook, anche su
+  errore o Ctrl+C; prima erano visibili con `ps` durante l'esecuzione.
 - **`KEEPALIVED_VRID` e `KEEPALIVED_AUTH_PASS`**: `virtual_router_id` (era fisso a 51) e password
   VRRP configurabili, per più cluster HA sulla stessa subnet/VLAN. Default invariati. Validati in
   `up` e nel wizard (passo *Access & network*, opzioni avanzate); il preflight avvisa se cambiano

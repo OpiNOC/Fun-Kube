@@ -603,11 +603,11 @@ su Ceph. Già fatto in questa occasione: `KEEPALIVED_VRID`/`KEEPALIVED_AUTH_PASS
    poco: i test scritti a mano per la patch VRID hanno trovato subito un bug (`LONGHORN_REPLICAS`
    assente da `DEFAULTS`, il wizard la caricava vuota). Aggiungere `ansible-playbook --syntax-check`
    e un test headless Textual (`App.run_test`) dei passi.
-2. **Segreti fuori dalla riga di comando**: `runner.py` passa le variabili con
+2. ✓ *Fatto (vedi CHANGELOG 1.1.0)* — **Segreti fuori dalla riga di comando**: `runner.py` passa le variabili con
    `--extra-vars '<json>'`; `NPM_DB_PASSWORD` e `KEEPALIVED_AUTH_PASS` sono visibili con `ps` durante
    l'esecuzione e possono finire nei log `--debug`. Scrivere le extra-vars in un file 0600 temporaneo
    e passarlo come `--extra-vars @file`.
-3. **`TRAEFIK_TRUSTED_IPS`** (serve ad AppGen a breve): con TLS terminato da un proxy esterno (NPM),
+3. ✓ *Fatto (vedi CHANGELOG 1.1.0)* — **`TRAEFIK_TRUSTED_IPS`** (serve ad AppGen a breve): con TLS terminato da un proxy esterno (NPM),
    l'entrypoint `web` deve fidarsi di `X-Forwarded-*` solo dall'IP del proxy
    (`ports.web.forwardedHeaders.trustedIPs`, idem `proxyProtocol` se usato). Oggi non è
    configurabile e un valore impostato a mano viene sovrascritto dal prossimo `up`

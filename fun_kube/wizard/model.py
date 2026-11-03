@@ -58,6 +58,7 @@ DEFAULTS: Dict[str, str] = {
     "TRAEFIK_IS_DEFAULT_CLASS": "true",
     "TRAEFIK_DASHBOARD_HOST": "",
     "TRAEFIK_ACME_EMAIL": "",
+    "TRAEFIK_TRUSTED_IPS": "",
     "NPM_LB_IP": "",
     "NPM_HTTP_NODEPORT": "30080",
     "NPM_HTTPS_NODEPORT": "30443",
@@ -111,7 +112,7 @@ SECTIONS: List[Tuple[str, str, List[str]]] = [
     ("MetalLB", "", ["METALLB_ENABLED", "METALLB_IP_POOL"]),
     ("Ingress", "", ["INGRESS_ENABLED", "INGRESS_TYPE", "INGRESS_SERVICE_TYPE",
                      "TRAEFIK_LB_IP", "TRAEFIK_HTTP_NODEPORT", "TRAEFIK_HTTPS_NODEPORT",
-                     "TRAEFIK_IS_DEFAULT_CLASS", "TRAEFIK_DASHBOARD_HOST", "TRAEFIK_ACME_EMAIL",
+                     "TRAEFIK_IS_DEFAULT_CLASS", "TRAEFIK_DASHBOARD_HOST", "TRAEFIK_ACME_EMAIL", "TRAEFIK_TRUSTED_IPS",
                      "NPM_LB_IP", "NPM_HTTP_NODEPORT", "NPM_HTTPS_NODEPORT", "NPM_ADMIN_NODEPORT",
                      "NPM_DB_PASSWORD", "NPM_DB_STORAGE", "NPM_DATA_STORAGE"]),
     ("Longhorn", "", ["LONGHORN_ENABLED", "LONGHORN_RWX", "LONGHORN_UI_NODEPORT", "LONGHORN_REPLICAS"]),
@@ -269,6 +270,7 @@ class WizardState:
             "TRAEFIK_HTTP_NODEPORT": traefik and not lb, "TRAEFIK_HTTPS_NODEPORT": traefik and not lb,
             "TRAEFIK_IS_DEFAULT_CLASS": traefik, "TRAEFIK_DASHBOARD_HOST": traefik,
             "TRAEFIK_ACME_EMAIL": traefik,
+            "TRAEFIK_TRUSTED_IPS": traefik,
             "NPM_LB_IP": npm and lb,
             "NPM_HTTP_NODEPORT": npm and not lb, "NPM_HTTPS_NODEPORT": npm and not lb,
             "NPM_ADMIN_NODEPORT": npm and not lb,
@@ -626,6 +628,13 @@ def step_errors(state: WizardState) -> Dict[str, List[str]]:
             _parse_ip_pool(v("METALLB_IP_POOL"))
         except ValueError:
             errs["Add-ons"].append("MetalLB pool: use a range (10.0.0.200-10.0.0.220) or a CIDR (10.0.0.192/28).")
+    if on("INGRESS_ENABLED") and v("INGRESS_TYPE") == "traefik" and v("TRAEFIK_TRUSTED_IPS"):
+        for item in (x.strip() for x in v("TRAEFIK_TRUSTED_IPS").split(",") if x.strip()):
+            try:
+                if ipaddress.ip_network(item, strict=False).prefixlen == 0:
+                    errs["Add-ons"].append(f"Trusted proxies: '{item}' would trust every client.")
+            except ValueError:
+                errs["Add-ons"].append(f"Trusted proxies: '{item}' is not an IP or CIDR.")
     if on("LONGHORN_ENABLED"):
         reps = v("LONGHORN_REPLICAS")
         if reps and not (reps.isdigit() and 0 <= int(reps) <= 3):

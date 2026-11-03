@@ -95,6 +95,10 @@ FIELDS = {
     "TRAEFIK_IS_DEFAULT_CLASS": ("Default IngressClass", "Ingress resources without a class use Traefik", "", True),
     "TRAEFIK_DASHBOARD_HOST": ("Dashboard host", "Empty = dashboard via port-forward only",
                                "Host name for the Traefik dashboard.", True),
+    "TRAEFIK_TRUSTED_IPS": ("Trusted proxies", "Comma separated IP/CIDR, e.g. 192.168.1.5/32",
+                            "Proxies in front of Traefik (e.g. an external Nginx Proxy Manager terminating TLS). "
+                            "Only from these sources Traefik keeps X-Forwarded-Proto/For; from anyone else they "
+                            "are overwritten. Never 0.0.0.0/0.", True),
     "TRAEFIK_ACME_EMAIL": ("Let's Encrypt e-mail", "Empty = no automatic certificates",
                            "Creates letsencrypt-staging / letsencrypt-prod issuers (cert-manager).", False),
     "NPM_LB_IP": ("Nginx Proxy Manager IP", "Empty = assigned by MetalLB", "Fixed IP from the MetalLB pool.", True),

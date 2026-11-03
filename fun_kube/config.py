@@ -56,6 +56,7 @@ class IngressConfig:
     traefik_is_default_class: bool
     traefik_dashboard_host: str
     traefik_acme_email: str
+    traefik_trusted_ips: List[str]  # IP/CIDR dei proxy fidati per X-Forwarded-* (es. NPM esterno)
     # NPM
     npm_lb_ip: str
     npm_http_nodeport: int
@@ -388,6 +389,25 @@ def _int_in_range(env: dict, key: str, default: int, lo: int, hi: int) -> int:
     return val
 
 
+def _parse_trusted_ips(env: dict, key: str) -> List[str]:
+    """Lista di IP/CIDR separati da virgola. Rifiuta 0.0.0.0/0 e ::/0 (= fidarsi di chiunque)."""
+    raw = (env.get(key) or "").strip()
+    if not raw:
+        return []
+    out = []
+    for item in (x.strip() for x in raw.split(",")):
+        if not item:
+            continue
+        try:
+            net = ipaddress.ip_network(item, strict=False)
+        except ValueError:
+            raise ConfigError(f"{key}: '{item}' non è un IP o un CIDR valido (es. 192.168.1.10/32).")
+        if net.prefixlen == 0:
+            raise ConfigError(f"{key}: '{item}' equivale a fidarsi di qualsiasi client; indicare solo i proxy.")
+        out.append(str(net))
+    return out
+
+
 def _parse_extra_sans(env: dict) -> List[str]:
     raw = env.get("API_SERVER_EXTRA_SANS", "").strip()
     if not raw:
@@ -487,6 +507,7 @@ def _parse_ingress(env: dict) -> IngressConfig:
         traefik_is_default_class=_bool(env, "TRAEFIK_IS_DEFAULT_CLASS", default=True),
         traefik_dashboard_host=env.get("TRAEFIK_DASHBOARD_HOST", "").strip(),
         traefik_acme_email=env.get("TRAEFIK_ACME_EMAIL", "").strip(),
+        traefik_trusted_ips=_parse_trusted_ips(env, "TRAEFIK_TRUSTED_IPS"),
         npm_lb_ip=env.get("NPM_LB_IP", "").strip(),
         npm_http_nodeport=int(env.get("NPM_HTTP_NODEPORT", "30080") or "30080"),
         npm_https_nodeport=int(env.get("NPM_HTTPS_NODEPORT", "30443") or "30443"),
@@ -580,6 +601,9 @@ def _validate(cfg: ClusterConfig) -> List[str]:
                 f"Longhorn: {cfg.longhorn_replicas} nodi schedulabili — repliche impostate a "
                 f"{cfg.longhorn_replicas} ({redundancy})."
             )
+
+    if cfg.ingress.traefik_trusted_ips and not (cfg.ingress.enabled and cfg.ingress.type == "traefik"):
+        warnings.append("TRAEFIK_TRUSTED_IPS ignorato: Traefik non è l'ingress attivo.")
 
     if cfg.ingress.enabled and cfg.ingress.type == "nginx-proxy-manager":
         for key, val in (("NPM_DB_STORAGE", cfg.ingress.npm_db_storage),
