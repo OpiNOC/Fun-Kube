@@ -1,5 +1,8 @@
-# Configurazione locale (contiene IP, chiavi, credenziali)
+# Configurazione locale (contiene IP, chiavi, credenziali): .env, .env.<cluster>
+# e i backup del wizard (.env.bak, .env.<cluster>.bak)
 .env
+.env.*
+!.env.example
 
 # Prompt per Kimi (strumento locale, non parte del progetto)
 KIMI-PROMPTS/
