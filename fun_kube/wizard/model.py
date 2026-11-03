@@ -68,6 +68,7 @@ DEFAULTS: Dict[str, str] = {
     "LONGHORN_ENABLED": "false",
     "LONGHORN_RWX": "false",
     "LONGHORN_UI_NODEPORT": "31080",
+    "LONGHORN_REPLICAS": "",
     "DN_ESSENCE_ENABLED": "true",
     "DN_ESSENCE_UI_NODEPORT": "30880",
     "MONITORING_ENABLED": "false",
@@ -614,12 +615,21 @@ def step_errors(state: WizardState) -> Dict[str, List[str]]:
                 errs["Access & network"].append("The VIP must be a free IP, not a node address.")
         except ValueError:
             errs["Access & network"].append("Virtual IP (VIP) is required for high availability.")
+        vrid = v("KEEPALIVED_VRID") or "51"
+        if not (vrid.isdigit() and 1 <= int(vrid) <= 255):
+            errs["Access & network"].append("VRRP router ID: a number from 1 to 255.")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,8}", v("KEEPALIVED_AUTH_PASS") or "fun-kube"):
+            errs["Access & network"].append("VRRP password: 1-8 characters (letters, digits, '.', '_', '-').")
 
     if on("METALLB_ENABLED"):
         try:
             _parse_ip_pool(v("METALLB_IP_POOL"))
         except ValueError:
             errs["Add-ons"].append("MetalLB pool: use a range (10.0.0.200-10.0.0.220) or a CIDR (10.0.0.192/28).")
+    if on("LONGHORN_ENABLED"):
+        reps = v("LONGHORN_REPLICAS")
+        if reps and not (reps.isdigit() and 0 <= int(reps) <= 3):
+            errs["Add-ons"].append("Longhorn replicas: empty (auto) or a number from 0 to 3.")
     if on("INGRESS_ENABLED") and v("INGRESS_TYPE") == "nginx-proxy-manager" and not v("NPM_DB_PASSWORD"):
         errs["Add-ons"].append("Nginx Proxy Manager database password is required.")
 

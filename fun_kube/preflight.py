@@ -537,6 +537,22 @@ def check_existing_cluster(cluster: ClusterConfig) -> Tuple[List[str], List[str]
                         "    Cambiarla da Grafana (Administration → Users) oppure lasciare la variabile vuota."
                     )
 
+    # --- VRID keepalived ---
+    if cluster.keepalived.enabled:
+        for node in cluster.control_planes:
+            rc, out, _ = _ssh(node, cluster,
+                              "awk '/virtual_router_id/{print $2; exit}' /etc/keepalived/keepalived.conf",
+                              False)
+            current = out.strip()
+            if rc == 0 and current and current != str(cluster.keepalived.vrid):
+                warnings.append(
+                    f"Keepalived: VRID sul nodo {node.hostname} {current} → {cluster.keepalived.vrid}.\n"
+                    "    keepalived viene ricaricato su tutti i CP: finché tutti non hanno il nuovo VRID\n"
+                    "    il VIP può sparire o comparire su due nodi per qualche secondo (API non\n"
+                    "    raggiungibile via VIP). Applicare in una finestra di manutenzione."
+                )
+                break
+
     # --- Repliche Longhorn ---
     if cluster.longhorn.enabled:
         rc, out = kubectl("get", "storageclass", "longhorn",

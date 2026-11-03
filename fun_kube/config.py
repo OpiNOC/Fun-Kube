@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import ipaddress
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Literal, Tuple
@@ -530,9 +531,9 @@ def _validate(cfg: ClusterConfig) -> List[str]:
     if cfg.topology == "ha" and not cfg.keepalived.vip:
         errors.append("KEEPALIVED_VIP è obbligatorio per topologia HA.")
     if cfg.keepalived.enabled:
-        ap = cfg.keepalived.auth_pass
-        if not ap or len(ap) > 8 or not ap.isascii() or any(c.isspace() for c in ap):
-            errors.append("KEEPALIVED_AUTH_PASS: 1-8 caratteri ASCII senza spazi (limite VRRP PASS).")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,8}", cfg.keepalived.auth_pass):
+            errors.append("KEEPALIVED_AUTH_PASS: 1-8 caratteri tra lettere, cifre, '.', '_' e '-' "
+                          "(VRRP PASS usa al massimo 8 caratteri).")
 
     # MetalLB IP pool obbligatorio se abilitato
     if cfg.metallb.enabled and not cfg.metallb.ip_pool:
@@ -565,10 +566,15 @@ def _validate(cfg: ClusterConfig) -> List[str]:
         redundancy = ("nessuna ridondanza" if cfg.longhorn_replicas == 1
                       else "tollera la perdita di 1 nodo")
         if cfg.longhorn.replicas > 0:
-            warnings.append(
-                f"Longhorn: repliche impostate a {cfg.longhorn_replicas} da LONGHORN_REPLICAS "
-                f"({redundancy} a livello Longhorn; adatto se lo storage sottostante è già replicato, es. Ceph)."
-            )
+            msg = (f"Longhorn: repliche impostate a {cfg.longhorn_replicas} da LONGHORN_REPLICAS "
+                   f"({redundancy} a livello Longhorn; adatto se lo storage sottostante è già replicato, es. Ceph).")
+            if cfg.longhorn.replicas > cfg.longhorn_replicas:
+                msg += (f"\n    LONGHORN_REPLICAS={cfg.longhorn.replicas} ridotto a {cfg.longhorn_replicas}: "
+                        "non ci sono abbastanza nodi schedulabili.")
+            if cfg.longhorn_replicas == 1:
+                msg += ("\n    Con 1 replica il drain di un nodo (upgrade) ferma i pod che usano i suoi volumi "
+                        "finché il nodo non torna disponibile.")
+            warnings.append(msg)
         else:
             warnings.append(
                 f"Longhorn: {cfg.longhorn_replicas} nodi schedulabili — repliche impostate a "

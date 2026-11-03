@@ -275,7 +275,16 @@ SERVICE_CIDR=10.96.0.0/12
 KEEPALIVED_ENABLED=true
 KEEPALIVED_VIP=10.0.0.100        # IP libero sulla subnet, non assegnato ad alcun nodo
 KEEPALIVED_INTERFACE=           # vuoto = auto-detect (interfaccia con l'IP del nodo)
+KEEPALIVED_VRID=51              # virtual_router_id VRRP (1-255), default 51
+KEEPALIVED_AUTH_PASS=fun-kube   # password VRRP, 1-8 caratteri [A-Za-z0-9._-]
 ```
+
+**Più cluster HA sulla stessa subnet/VLAN**: ogni cluster deve avere un `KEEPALIVED_VRID` diverso
+(es. 51 e 52). Con lo stesso VRID i gruppi VRRP dei due cluster si vedono come un unico gruppo:
+il VIP di un cluster può sparire o finire su un nodo dell'altro. La password VRRP viaggia in
+chiaro: distingue i cluster, non è una protezione. Cambiare il VRID su un cluster esistente è
+possibile (`up` ricarica keepalived, con avviso nel preflight) ma il VIP può interrompersi per
+qualche secondo: farlo in una finestra di manutenzione. `diagnose` mostra il VRID di ogni CP.
 
 Il `KEEPALIVED_VIP` diventa l'**endpoint del cluster**: è l'IP usato da kubeadm come `--control-plane-endpoint` e presente nel kubeconfig. In caso di failover del CP attivo, il VIP si sposta automaticamente su un altro nodo e il cluster rimane raggiungibile.
 
@@ -359,6 +368,7 @@ Su cluster multi-nodo richiede `LONGHORN_ENABLED=true` per lo storage RWX condiv
 LONGHORN_ENABLED=true
 LONGHORN_RWX=true                 # abilita StorageClass ReadWriteMany (longhorn-rwx)
 LONGHORN_UI_NODEPORT=31080        # 0 = UI non esposta
+LONGHORN_REPLICAS=                # vuoto/0 = automatico (tabella sotto); 1-3 = valore fisso
 ```
 
 Funziona su qualsiasi numero di nodi. Il numero di repliche viene calcolato automaticamente in base ai nodi schedulabili del cluster:
@@ -370,6 +380,14 @@ Funziona su qualsiasi numero di nodi. Il numero di repliche viene calcolato auto
 | 3+ | 3 | Piena — tolera la perdita di 1 nodo senza interruzioni |
 
 Fun-Kube mostra un avviso durante `up` se le repliche sono inferiori a 3.
+
+**Storage sottostante già replicato** (es. dischi delle VM su Ceph in Proxmox): `LONGHORN_REPLICAS=1`
+(o 2) evita di moltiplicare le copie e lo spazio occupato. Il valore non supera mai i nodi
+schedulabili. La disponibilità dipende allora dal nodo: se il nodo che ospita la replica è giù, il
+volume non è accessibile finché non torna (i dati restano su Ceph). Con 1 replica `upgrade`
+ferma i pod che usano i volumi del nodo in drain (lo indica e chiede conferma). La StorageClass
+`longhorn-monitoring` usa min(2, repliche). Cambiare il valore su un cluster esistente aggiorna le
+StorageClass; i volumi già creati mantengono le loro repliche (modificabili dalla UI Longhorn).
 
 **Mononodo**: local-path è sempre installato ed è la StorageClass default. Longhorn su un solo
 nodo ha 1 replica (nessuna ridondanza in più di local-path) e circa 20 pod di overhead: ha

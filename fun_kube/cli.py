@@ -597,22 +597,27 @@ def _calico_section(kube_env: dict) -> str:
 
 def _keepalived_section(cluster) -> str:
     import subprocess as sp
-    lines = [f"[bold]Keepalived[/]  VIP: [cyan]{cluster.keepalived.vip}[/]  iface: {cluster.keepalived.interface or 'auto'}"]
+    lines = [f"[bold]Keepalived[/]  VIP: [cyan]{cluster.keepalived.vip}[/]  iface: {cluster.keepalived.interface or 'auto'}"
+             f"  VRID .env: {cluster.keepalived.vrid}"]
     master = None
     for node in cluster.control_planes:
         try:
-            cmd = f"ip addr show | grep -q '{cluster.keepalived.vip}' && echo MASTER || echo BACKUP"
+            cmd = (f"ip addr show | grep -q '{cluster.keepalived.vip}' && echo MASTER || echo BACKUP; "
+                   "awk '/virtual_router_id/{print $2; exit}' /etc/keepalived/keepalived.conf 2>/dev/null")
             r = sp.run(
                 ["ssh", "-i", str(cluster.ssh_key_path), "-o", "StrictHostKeyChecking=no",
                  "-o", "ConnectTimeout=5", f"{cluster.ssh_user}@{node.ip}", cmd],
                 capture_output=True, text=True, timeout=8,
             )
-            role = r.stdout.strip()
+            out = r.stdout.split()
+            role = out[0] if out else ""
+            vrid = out[1] if len(out) > 1 else "?"
+            vrid_note = "" if vrid == str(cluster.keepalived.vrid) else f"  [yellow]VRID nodo {vrid} ≠ .env[/]"
             if role == "MASTER":
                 master = node.hostname
-                lines.append(f"  MASTER: [green]{node.hostname}[/] ({node.ip})")
+                lines.append(f"  MASTER: [green]{node.hostname}[/] ({node.ip}){vrid_note}")
             else:
-                lines.append(f"  backup: {node.hostname} ({node.ip})")
+                lines.append(f"  backup: {node.hostname} ({node.ip}){vrid_note}")
         except Exception:
             lines.append(f"  [yellow]?[/] {node.hostname} ({node.ip})")
     if master is None:
@@ -957,7 +962,8 @@ def _print_cluster_summary(cluster: "cfg_module.ClusterConfig") -> None:
     console.print(f"  Pod CIDR     : {cluster.pod_cidr}")
     console.print(f"  Service CIDR : {cluster.service_cidr}")
     if cluster.topology == "ha":
-        console.print(f"  VIP          : {cluster.keepalived.vip}  (iface: {cluster.keepalived.interface or 'auto'})")
+        console.print(f"  VIP          : {cluster.keepalived.vip}  (iface: {cluster.keepalived.interface or 'auto'}, "
+                      f"VRID {cluster.keepalived.vrid})")
     if cluster.local_node:
         console.print(f"  Modalità     : [yellow]local-node[/] (bootstrap = nodo)")
     else:

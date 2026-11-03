@@ -4,6 +4,13 @@
 
 ### Novità
 
+- **`KEEPALIVED_VRID` e `KEEPALIVED_AUTH_PASS`**: `virtual_router_id` (era fisso a 51) e password
+  VRRP configurabili, per più cluster HA sulla stessa subnet/VLAN. Default invariati. Validati in
+  `up` e nel wizard (passo *Access & network*, opzioni avanzate); il preflight avvisa se cambiano
+  su un cluster esistente; `diagnose` mostra il VRID di ogni CP.
+- **`LONGHORN_REPLICAS`**: numero di repliche fisso (1-3, mai oltre i nodi schedulabili) invece del
+  calcolo automatico, per storage sottostante già replicato (es. Ceph). Vuoto = comportamento
+  precedente. Nel wizard nel passo *Add-ons* (opzioni avanzate).
 - **Wizard interattivo** `./fun-kube --wizard` (o `fun-kube wizard`): interfaccia a terminale stile
   k9s, solo tastiera, in inglese. Crea o modifica il `.env` di uno o più cluster con scelte a
   cascata, spiegazioni per ogni passo e campo, opzioni avanzate su `F2`, campi bloccati sui

@@ -326,7 +326,8 @@ Comportamento di `up` quando il `.env` cambia dopo l'installazione:
 | Addon abilitato dopo | installato |
 | Addon messo a `false` | **non disinstallato** (playbook saltato, resta com'è) |
 | Nodo rimosso dal `.env` | non toccato — warning con comandi drain/delete |
-| Repliche Longhorn cambiate (nodi aggiunti) | SC `longhorn` aggiornata via ConfigMap `longhorn-storageclass`, `longhorn-rwx` ricreata; volumi esistenti invariati |
+| `KEEPALIVED_VRID` / `KEEPALIVED_AUTH_PASS` | keepalived riconfigurato e ricaricato; warning nel preflight (possibile breve interruzione del VIP) |
+| Repliche Longhorn cambiate (nodi aggiunti o `LONGHORN_REPLICAS`) | SC `longhorn` aggiornata via ConfigMap `longhorn-storageclass`, `longhorn-rwx` ricreata; volumi esistenti invariati |
 | Primi worker su cluster solo-CP | warning: i CP restano senza taint (comando per ri-applicarlo) |
 | `KEEPALIVED_VIP` / endpoint (anche 1 CP → HA), `POD_CIDR`, `SERVICE_CIDR` | **errore prima di toccare i nodi** — richiede reset + up |
 | `NPM_DB_PASSWORD` | **errore** — procedura ALTER USER nel file di manutenzione |
@@ -729,6 +730,8 @@ LONGHORN_UI_NODEPORT=31080        # (era 30080 — cambiato per non collidere co
 KEEPALIVED_ENABLED=false
 KEEPALIVED_VIP=192.168.1.100
 KEEPALIVED_INTERFACE=           # vuoto = auto-detect (interfaccia con l'IP del nodo)
+KEEPALIVED_VRID=51              # unico per ogni cluster HA sulla stessa subnet
+KEEPALIVED_AUTH_PASS=fun-kube   # 1-8 caratteri
 ```
 
 CIDR da tenere non sovrapposti: `POD_CIDR`, `SERVICE_CIDR`, `METALLB_IP_POOL`.

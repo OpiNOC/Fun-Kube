@@ -75,7 +75,9 @@ FIELDS = {
     "KEEPALIVED_VRID": ("VRRP router ID", "1-255, default 51",
                         "Must differ for every HA cluster on the same subnet/VLAN, otherwise their VRRP "
                         "groups interfere and the VIP can move to the wrong cluster.", True),
-    "KEEPALIVED_AUTH_PASS": ("VRRP password", "Max 8 characters", "", True),
+    "KEEPALIVED_AUTH_PASS": ("VRRP password", "1-8 characters: letters, digits, . _ -",
+                             "Shared by the control-planes of this cluster. VRRP sends it in clear text: "
+                             "it separates clusters, it is not a security boundary.", True),
     "METALLB_ENABLED": ("MetalLB", "IP load balancer for on-premise clusters",
                         "Gives LoadBalancer services a real IP from a pool on your LAN (layer 2). Needed for "
                         "ingress or Grafana on a dedicated IP.", False),
@@ -109,7 +111,9 @@ FIELDS = {
     "LONGHORN_RWX": ("ReadWriteMany volumes", "Volumes shared by several pods (via NFS)", "", False),
     "LONGHORN_UI_NODEPORT": ("Longhorn UI NodePort", "0 = not exposed", "", True),
     "LONGHORN_REPLICAS": ("Replicas", "Empty = auto (up to 3)",
-                          "Set 1 or 2 when node disks already sit on replicated storage (e.g. Ceph).", True),
+                          "Set 1 or 2 when node disks already sit on replicated storage (e.g. Ceph). "
+                          "Capped at the number of schedulable nodes. With 1 replica, draining a node "
+                          "(upgrade) stops the pods using its volumes until it is back.", True),
     "DN_ESSENCE_ENABLED": ("DN-essence", "DNS rewrite manager for CoreDNS", "Rewrites DNS names inside the "
                            "cluster (hairpin NAT, split-horizon DNS). Web UI included.", False),
     "DN_ESSENCE_UI_NODEPORT": ("DN-essence UI NodePort", "0 = port-forward only", "", True),

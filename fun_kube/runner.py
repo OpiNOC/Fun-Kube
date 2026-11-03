@@ -104,6 +104,8 @@ def write_output(cluster: ClusterConfig) -> None:
             "# Keepalived",
             f"VIP:             {cluster.keepalived.vip}",
             f"Interface:       {cluster.keepalived.interface or 'auto-detect'}",
+            f"VRRP router ID:  {cluster.keepalived.vrid}  (unico per cluster sulla stessa subnet)",
+            "Config nodi:     /etc/keepalived/keepalived.conf",
         ]
 
     if cluster.metallb.enabled:
@@ -286,6 +288,7 @@ def _write_maintenance_file(cluster: ClusterConfig) -> None:
             "",
             f"Keepalived VIP:       {cluster.keepalived.vip}",
             f"Keepalived interface: {cluster.keepalived.interface or 'auto-detect'}",
+            f"Keepalived VRID:      {cluster.keepalived.vrid}",
         ]
 
     if cluster.metallb.enabled:
