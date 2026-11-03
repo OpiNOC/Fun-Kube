@@ -3,3 +3,6 @@
 keepalived_vip: ""
 # Vuoto = auto-detect: interfaccia che porta l'IP del nodo (ansible_host)
 keepalived_interface: ""
+# virtual_router_id VRRP: unico per ogni cluster HA sullo stesso segmento L2
+keepalived_vrid: 51
+keepalived_auth_pass: fun-kube

@@ -32,6 +32,8 @@ class KeepalivedConfig:
     enabled: bool
     vip: str
     interface: str
+    vrid: int = 51          # virtual_router_id VRRP: distinto per ogni cluster sullo stesso segmento L2
+    auth_pass: str = "fun-kube"  # VRRP PASS: max 8 caratteri
 
 
 @dataclass
@@ -68,6 +70,7 @@ class LonghornConfig:
     enabled: bool
     rwx: bool
     ui_nodeport: int  # 0 = disabilitato, altrimenti porta NodePort (es. 30080)
+    replicas: int = 0  # 0 = automatico (min(nodi schedulabili, 3)); es. 1 su storage già replicato (Ceph)
 
 
 @dataclass
@@ -158,7 +161,10 @@ class ClusterConfig:
         """Numero di repliche Longhorn: min(nodi schedulabili, 3).
         I nodi schedulabili sono i worker, o i CP se untainted (nessun worker)."""
         schedulable = len(self.workers) if self.workers else len(self.control_planes)
-        return min(schedulable, 3)
+        auto = min(schedulable, 3)
+        if self.longhorn.replicas > 0:
+            return min(self.longhorn.replicas, auto)
+        return auto
 
     @property
     def monitoring_sc_replicas(self) -> int:
@@ -229,6 +235,7 @@ def load(env_file: Path) -> ClusterConfig:
             enabled=_bool(env, "LONGHORN_ENABLED"),
             rwx=_bool(env, "LONGHORN_RWX"),
             ui_nodeport=int(env.get("LONGHORN_UI_NODEPORT", "31080") or "31080"),
+            replicas=_int_in_range(env, "LONGHORN_REPLICAS", 0, 0, 3),
         ),
         dn_essence=DnEssenceConfig(
             enabled=_bool(env, "DN_ESSENCE_ENABLED", default=True),
@@ -362,7 +369,22 @@ def _parse_keepalived(env: dict, topology: Topology) -> KeepalivedConfig:
         enabled=enabled,
         vip=env.get("KEEPALIVED_VIP", "").strip(),
         interface=env.get("KEEPALIVED_INTERFACE", "").strip(),
+        vrid=_int_in_range(env, "KEEPALIVED_VRID", 51, 1, 255),
+        auth_pass=_str(env, "KEEPALIVED_AUTH_PASS", "fun-kube"),
     )
+
+
+def _int_in_range(env: dict, key: str, default: int, lo: int, hi: int) -> int:
+    raw = (env.get(key) or "").strip()
+    if not raw:
+        return default
+    try:
+        val = int(raw)
+    except ValueError:
+        raise ConfigError(f"{key} deve essere un intero tra {lo} e {hi}, trovato: '{raw}'")
+    if not lo <= val <= hi:
+        raise ConfigError(f"{key} deve essere tra {lo} e {hi}, trovato: {val}")
+    return val
 
 
 def _parse_extra_sans(env: dict) -> List[str]:
@@ -507,6 +529,10 @@ def _validate(cfg: ClusterConfig) -> List[str]:
     # Keepalived VIP obbligatorio in HA
     if cfg.topology == "ha" and not cfg.keepalived.vip:
         errors.append("KEEPALIVED_VIP è obbligatorio per topologia HA.")
+    if cfg.keepalived.enabled:
+        ap = cfg.keepalived.auth_pass
+        if not ap or len(ap) > 8 or not ap.isascii() or any(c.isspace() for c in ap):
+            errors.append("KEEPALIVED_AUTH_PASS: 1-8 caratteri ASCII senza spazi (limite VRRP PASS).")
 
     # MetalLB IP pool obbligatorio se abilitato
     if cfg.metallb.enabled and not cfg.metallb.ip_pool:
@@ -538,10 +564,16 @@ def _validate(cfg: ClusterConfig) -> List[str]:
     elif cfg.longhorn.enabled and cfg.longhorn_replicas < 3:
         redundancy = ("nessuna ridondanza" if cfg.longhorn_replicas == 1
                       else "tollera la perdita di 1 nodo")
-        warnings.append(
-            f"Longhorn: {cfg.longhorn_replicas} nodi schedulabili — repliche impostate a "
-            f"{cfg.longhorn_replicas} ({redundancy})."
-        )
+        if cfg.longhorn.replicas > 0:
+            warnings.append(
+                f"Longhorn: repliche impostate a {cfg.longhorn_replicas} da LONGHORN_REPLICAS "
+                f"({redundancy} a livello Longhorn; adatto se lo storage sottostante è già replicato, es. Ceph)."
+            )
+        else:
+            warnings.append(
+                f"Longhorn: {cfg.longhorn_replicas} nodi schedulabili — repliche impostate a "
+                f"{cfg.longhorn_replicas} ({redundancy})."
+            )
 
     if cfg.ingress.enabled and cfg.ingress.type == "nginx-proxy-manager":
         for key, val in (("NPM_DB_STORAGE", cfg.ingress.npm_db_storage),

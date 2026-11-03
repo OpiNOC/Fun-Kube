@@ -483,6 +483,8 @@ def _build_extra_vars(cluster: ClusterConfig, k8s_version_resolved: str) -> dict
         "keepalived_enabled": cluster.keepalived.enabled,
         "keepalived_vip": cluster.keepalived.vip,
         "keepalived_interface": cluster.keepalived.interface,
+        "keepalived_vrid": cluster.keepalived.vrid,
+        "keepalived_auth_pass": cluster.keepalived.auth_pass,
         # Timezone
         "cluster_timezone": cluster.cluster_timezone,
         # MetalLB
