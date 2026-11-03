@@ -581,6 +581,55 @@ boot nessuna esecuzione, timer attivo, componenti del control plane Running dopo
 
 ## Prossimi passi / idee (aggiornato 2026-10-22)
 
+### Revisione 2026-11-03 — uso reale per AppGen (2 cluster HA sulla stessa /24)
+
+Contesto: provisioning di due cluster HA da 3 CP (AppGen e Runtime) sulla stessa subnet, dischi VM
+su Ceph. Già fatto in questa occasione: `KEEPALIVED_VRID`/`KEEPALIVED_AUTH_PASS`, `LONGHORN_REPLICAS`
+(8dca1b0), `.gitignore` per `.env.<cluster>` (e791f03).
+
+**Cosa funziona molto bene** (da preservare nelle modifiche future):
+- versioni fissate in `versions.py` e manifest vendored: installazione riproducibile;
+- preflight in sola lettura (scarto orologi, stima spazio Longhorn prima di installare, blocco delle
+  modifiche non applicabili su cluster esistenti): ha trovato subito nodi con netmask /32
+  (`inter-node connectivity`);
+- ciclo di vita completo (`up` idempotente, aggiunta nodi, `upgrade` con controlli, `reset`);
+- dettagli da produzione: `node_ip` esplicito, health check API nel keepalived, rinnovo certificati,
+  kubeconfig a token senza scadenza annuale;
+- wizard validato con lo stesso `config.load()` di `up`.
+
+**Da fare, in ordine di utilità:**
+1. **Test automatici**: nessuna suite nel repo. Una suite pytest su `config.py` (parsing, validazione,
+   topologie, casi errati) e su `wizard/model.py` (DEFAULTS, visibilità, `step_errors`, render) costa
+   poco: i test scritti a mano per la patch VRID hanno trovato subito un bug (`LONGHORN_REPLICAS`
+   assente da `DEFAULTS`, il wizard la caricava vuota). Aggiungere `ansible-playbook --syntax-check`
+   e un test headless Textual (`App.run_test`) dei passi.
+2. **Segreti fuori dalla riga di comando**: `runner.py` passa le variabili con
+   `--extra-vars '<json>'`; `NPM_DB_PASSWORD` e `KEEPALIVED_AUTH_PASS` sono visibili con `ps` durante
+   l'esecuzione e possono finire nei log `--debug`. Scrivere le extra-vars in un file 0600 temporaneo
+   e passarlo come `--extra-vars @file`.
+3. **`TRAEFIK_TRUSTED_IPS`** (serve ad AppGen a breve): con TLS terminato da un proxy esterno (NPM),
+   l'entrypoint `web` deve fidarsi di `X-Forwarded-*` solo dall'IP del proxy
+   (`ports.web.forwardedHeaders.trustedIPs`, idem `proxyProtocol` se usato). Oggi non è
+   configurabile e un valore impostato a mano viene sovrascritto dal prossimo `up`
+   (`helm upgrade` con i values di Fun-Kube). Mai `insecure: true`.
+4. **Altri valori fissi pensati per un solo cluster**: VRID e `.gitignore` ne erano sintomi.
+   Ricontrollare template e default (nomi, porte, password di default, risorse condivise sulla LAN).
+5. **Minori**:
+   - SSH con `StrictHostKeyChecking=no` ovunque (preflight, diagnose, inventory): `accept-new` dà
+     quasi la stessa comodità senza accettare chiavi cambiate;
+   - `DN_ESSENCE_VERSION` vuoto = ultima versione dal registry: unica eccezione alla
+     riproducibilità, fissarla in `versions.py` come gli altri;
+   - file molto lunghi (`cli.py` ~1050 righe, questo PROJECT.md ~970): separare diagnose/summary in
+     moduli e spostare lo storico dei test in un file dedicato;
+   - **disco Longhorn dedicato** (idea `LONGHORN_DISK` sotto): verificato a mano in AppGen montando un
+     disco ext4 su `/var/lib/longhorn` per UUID prima di `up` (senza `nofail`, così il nodo non
+     scrive su root se il disco manca). Lo script usato è un buon punto di partenza: rifiuta dischi
+     con partizioni, filesystem o firme e il disco di sistema.
+
+**Confine con AppGen**: Fun-Kube resta l'installer di infrastruttura e addon di base; i componenti di
+piattaforma (CloudNativePG, registry, LiteLLM, controller) restano nel repo dell'applicazione. Eccezione:
+la configurazione di ciò che Fun-Kube installa (es. Traefik, punto 3) deve vivere qui.
+
 - **Test residui**: LOCAL_NODE (bootstrap = nodo). Reset del 2026-10-20 e timer di rinnovo
   certificati testati il 2026-10-22
 - **Calico APIServer**: aggiunto e testato su cluster esistente (2026-10-12): tigerastatus
